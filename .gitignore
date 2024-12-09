@@ -1,0 +1,7 @@
+*.so
+*.wpo
+*.repl.*
+.psc-ide-port
+.purs-repl
+output
+src
