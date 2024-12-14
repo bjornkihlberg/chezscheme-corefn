@@ -507,8 +507,8 @@
           [`(variable ,@(xs (reverse xs) xs))
               (let ([module-prefix (module-name->prefix (reverse (cdr xs)))]
                     [identifier (car xs)])
-                (string->symbol (string-append module-prefix identifier)))]
-          [`(application ,abstraction ,expression) (list (loop abstraction) (loop expression))]
+                (list '%ref (string->symbol (string-append module-prefix identifier))))]
+          [`(application ,abstraction ,expression) (list '%app (loop abstraction) (loop expression))]
           [`(abstraction ,(x (string->symbol x) x) ,body) `(-> ,x ,(loop body))]
           [`(bind ,(x (string->symbol x) x) ,e ,body)
               (let inner-loop ([body body] [acc (list (list x (loop e)))])
@@ -566,7 +566,7 @@
                       (import (prefix foreign-module ,(string->symbol module-prefix))))
                     '())
                 (import (only (chezscheme) define let let* letrec)
-                        (only (prim) -> define-newtype-constructor define-data-constructor case object array data access update)
+                        (only (prim) %app %ref -> define-newtype-constructor define-data-constructor case object array data access update)
                         ,@(map (lambda (x) (list (string->symbol x))) (sort string<? (map module-name->dotted imports))))
                 ,@(map
                     (lambda (x) (newtype-declaration->scheme module-prefix x))
@@ -646,7 +646,7 @@
 
   (define prim-library
     '(library (prim)
-        (export -> define-newtype-constructor define-data-constructor case object array data access update)
+        (export %app %ref -> define-newtype-constructor define-data-constructor case object array data access update)
 
         (import (except (chezscheme) case))
 
@@ -656,18 +656,26 @@
 
         (define is-newtype)
 
-        (define-syntax (define-data-constructor code)
-          (syntax-case code ()
-            [(_ name n)
-              (with-syntax ([(args ...) (generate-temporaries (iota (datum n)))])
-                #'(define (name args ...) (vector 'name args ...)))]))
-
         (define-syntax define-newtype-constructor
           (syntax-rules ()
             [(_ name)
               (begin
                 (define (name x) x)
                 (define-property name is-newtype #t))]))
+
+        (define-syntax (define-data-constructor code)
+          (syntax-case code ()
+            [(_ name n)
+              (with-syntax ([(args ...) (generate-temporaries (iota (datum n)))])
+                #'(define (name args ...) (vector 'name args ...)))]))
+
+        (define-syntax %app
+          (syntax-rules ()
+            [(_ f x) (f x)]))
+
+        (define-syntax %ref
+          (syntax-rules ()
+            [(_ x) x]))
 
         (define-syntax corefn-case-clause
           (lambda (code)
