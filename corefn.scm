@@ -450,14 +450,21 @@
           [module-name (vector->list (cdr (assert (assoc "moduleName" corefn))))]
           [foreign-imports (vector->list (cdr (assert (assoc "foreign" corefn))))]
           [exports (vector->list (cdr (assert (assoc "exports" corefn))))]
-          [declarations (apply append
-                          (vector->list
-                            (vector-map
-                              (lambda (x) (if (char=? (string-ref (cdr (assert (assoc "bindType" x))) 0) #\N)
-                                              (list (list (cdr (assert (assoc "identifier" x))) (json-corefn-expression->scheme-corefn (cdr (assert (assoc "expression" x))))))
-                                              (let ([binds (vector->list (cdr (assert (assoc "binds" x))))])
-                                                (map (lambda (x) (list (cdr (assert (assoc "identifier" x))) (json-corefn-expression->scheme-corefn (cdr (assert (assoc "expression" x)))))) binds))))
-                              (cdr (assert (assoc "decls" corefn))))))])
+          [declarations (let loop ([decls (vector->list (cdr (assert (assoc "decls" corefn))))] [acc '()])
+                          (if (null? decls)
+                              acc
+                              (let ([expression (cdr (assert (assoc "expression" (car decls))))])
+                                (if (char=? (string-ref (cdr (assert (assoc "bindType" (car decls)))) 0) #\N)
+                                    (loop (cdr decls)
+                                          (let ([meta-ann (cdr (assert (assoc "meta" (cdr (assert (assoc "annotation" expression))))))]
+                                                [id (cdr (assert (assoc "identifier" (car decls))))])
+                                            (let ([meta-type (cond [(and (not (eq? meta-ann 'null)) (assoc "metaType" meta-ann)) => cdr] [else #f])])
+                                              (case meta-type
+                                                ["IsNewtype"
+                                                  (cons (list id '(newtype))
+                                                        acc)]
+                                                [else (cons (list id (json-corefn-expression->scheme-corefn expression)) acc)]))))
+                                    (loop (append (vector->list (cdr (assert (assoc "binds" (car decls))))) (cdr decls)) acc)))))])
       (let ([imports (filter (lambda (x) (and (not (equal? x '("Prim"))) (not (equal? x module-name)))) (vector->list (vector-map (lambda (x) (vector->list (cdr (assert (assoc "moduleName" x))))) (cdr (assert (assoc "imports" corefn))))))])
         `(corefn-module
           ,module-name
@@ -534,13 +541,18 @@
           [args (map string->symbol (cddadr corefn))])
       (cond [(null? args) `(define ,name (data ,name))]
             [(= (length args) 1) `(define ,name (lambda (,(car args)) (data ,name ,(car args))))]
-            [else `(define ,name (-> ,args (data ,name ,@args)))])))
+            [else `(define ,name (lambda ,args (data ,name ,@args)))])))
+
+  (define (newtype-declaration->scheme module-prefix corefn)
+    (let ([name (string->symbol (string-append module-prefix (car corefn)))])
+      `(define-newtype ,name)))
 
   (define (corefn->library corefn)
     (let ([corefn (json-corefn->scheme-corefn corefn)])
       (let-values ([(module-name module-path imports foreign-imports exports re-exports declarations) (apply values (cdr corefn))])
         (let ([module-prefix (module-name->prefix module-name)])
-          (let-values ([(data-declarations declarations) (partition (match-lambda [`(,name (data ,@_)) #t] [else #f]) declarations)])
+          (let*-values ([(data-declarations declarations) (partition (match-lambda [`(,name (data ,@_)) #t] [else #f]) declarations)]
+                        [(newtype-declarations declarations) (partition (match-lambda [`(,name (newtype)) #t] [else #f]) declarations)])
             `(library (,(string->symbol (module-name->dotted module-name)))
                 (export
                   ,@(map (lambda (export) (string->symbol (string-append module-prefix export))) (sort string<? exports))
@@ -556,8 +568,11 @@
                       (import (prefix foreign-module ,(string->symbol module-prefix))))
                     '())
                 (import (only (chezscheme) define lambda let let* letrec)
-                        (only (prim) -> case object array data access update)
+                        (only (prim) define-newtype -> case object array data access update)
                         ,@(map (lambda (x) (list (string->symbol x))) (sort string<? (map module-name->dotted imports))))
+                ,@(map
+                    (lambda (x) (newtype-declaration->scheme module-prefix x))
+                    (sort (lambda (x y) (string<? (car x) (car y))) newtype-declarations))
                 ,@(map
                     (lambda (x) (data-declaration->scheme module-prefix x))
                     (sort (lambda (x y) (string<? (car x) (car y))) data-declarations))
@@ -620,6 +635,8 @@
                               (let ([s (call-with-string-output-port (lambda (sop) (pretty-print e sop)))])
                                 (put-string textual-output-port s 0 (sub1 (string-length s))))
                               (put-char textual-output-port #\))]
+                          [`(define-newtype ,x)
+                            (format textual-output-port "\n\n  (define-newtype ~s)" x)]
                           [else (assert #f)])
             definitions))
         (put-char textual-output-port #\))
@@ -629,42 +646,56 @@
 
   (define prim-library
     '(library (prim)
-        (export -> case object array data access update)
+        (export -> define-newtype case object array data access update)
 
         (import (except (chezscheme) case))
 
         (define-syntax (-> code) (syntax-error code "misplaced aux keyword"))
 
-        (define-syntax (corefn-case-clause code)
-          (syntax-case code (->)
-            [(_ () [() -> e])
-              #'e]
-            [(_ () [() [t -> e] ...])
-              #'(cond [t e] ...)]
-            [(_ (v vs ...) clause) (pair? (datum v))
-              #'(let ([u v]) (corefn-case-clause (u vs ...) clause))]
-            [(_ (v vs ...) [(p ps ...) clause* ...]) (and (identifier? #'p) (free-identifier=? #'p #'_))
-              #'(corefn-case-clause (vs ...) [(ps ...) clause* ...])]
-            [(_ (v vs ...) [(p ps ...) clause* ...]) (identifier? #'p)
-              #'(let ([p v]) (corefn-case-clause (vs ...) [(ps ...) clause* ...]))]
-            [(_ (v vs ...) [((d name xs ...) ps ...) clause* ...]) (and (identifier? #'d) (free-identifier=? #'d #'data))
-              #`(when (symbol=? (vector-ref v 0) 'name)
-                  (corefn-case-clause (#,@(map (lambda (i) #`(vector-ref v #,(add1 i))) (iota (length #'(xs ...)))) vs ...)
-                    [(xs ... ps ...) clause* ...]))]
-            [(_ (v vs ...) [((a xs ...) ps ...) clause* ...]) (and (identifier? #'a) (free-identifier=? #'a #'array))
-              (let ([n (length #'(xs ...))])
-                #`(when (= (vector-length v) #,n)
-                    (corefn-case-clause (#,@(map (lambda (i) #`(vector-ref v #,i)) (iota n)) vs ...)
-                      [(xs ... ps ...) clause* ...])))]
-            [(_ (v vs ...) [((o) ps ...) clause* ...]) (and (identifier? #'o) (free-identifier=? #'o #'object))
-              #'(corefn-case-clause (vs ...) [(ps ...) clause* ...])]
-            [(m (v vs ...) [((o [k x] k/x ...) ps ...) clause* ...]) (and (identifier? #'o) (free-identifier=? #'o #'object))
-              #`(let ([v0 (corefn-access v k)])
-                  (corefn-case-clause (v0 v vs ...) [(x (o k/x ...) ps ...) clause* ...]))]
-            [(_ (v vs ...) [((n p) ps ...) clause* ...]) (identifier? #'n)
-              #'(let ([n v]) (corefn-case-clause (v vs ...) [(p ps ...) clause* ...]))]
-            [(_ (v vs ...) [(p ps ...) clause* ...])
-              #'(when (equal? v p) (corefn-case-clause (vs ...) [(ps ...) clause* ...]))]))
+        (define is-newtype)
+
+        (define-syntax define-newtype
+          (syntax-rules ()
+            [(_ name)
+              (begin
+                (define (name x) x)
+                (define-property name is-newtype #t))]))
+
+        (define-syntax corefn-case-clause
+          (lambda (code)
+            (lambda (lookup)
+              (syntax-case code (->)
+                [(_ () [() -> e])
+                  #'e]
+                [(_ () [() [t -> e] ...])
+                  #'(cond [t e] ...)]
+                [(_ (v vs ...) clause) (pair? (datum v))
+                  #'(let ([u v]) (corefn-case-clause (u vs ...) clause))]
+                [(_ (v vs ...) [(p ps ...) clause* ...]) (and (identifier? #'p) (free-identifier=? #'p #'_))
+                  #'(corefn-case-clause (vs ...) [(ps ...) clause* ...])]
+                [(_ (v vs ...) [(p ps ...) clause* ...]) (identifier? #'p)
+                  #'(let ([p v]) (corefn-case-clause (vs ...) [(ps ...) clause* ...]))]
+                [(_ (v vs ...) [((d name xs ...) ps ...) clause* ...]) (and (identifier? #'d) (free-identifier=? #'d #'data))
+                  (if (lookup #'name #'is-newtype)
+                      #'(corefn-case-clause (v vs ...) ((xs ... ps ...) clause* ...))
+                      #`(when (symbol=? (vector-ref v 0) 'name)
+                          (corefn-case-clause
+                            (#,@(map (lambda (i) #`(vector-ref v #,(add1 i))) (iota (length #'(xs ...)))) vs ...)
+                            ((xs ... ps ...) clause* ...))))]
+                [(_ (v vs ...) [((a xs ...) ps ...) clause* ...]) (and (identifier? #'a) (free-identifier=? #'a #'array))
+                  (let ([n (length #'(xs ...))])
+                    #`(when (= (vector-length v) #,n)
+                        (corefn-case-clause (#,@(map (lambda (i) #`(vector-ref v #,i)) (iota n)) vs ...)
+                          [(xs ... ps ...) clause* ...])))]
+                [(_ (v vs ...) [((o) ps ...) clause* ...]) (and (identifier? #'o) (free-identifier=? #'o #'object))
+                  #'(corefn-case-clause (vs ...) [(ps ...) clause* ...])]
+                [(m (v vs ...) [((o [k x] k/x ...) ps ...) clause* ...]) (and (identifier? #'o) (free-identifier=? #'o #'object))
+                  #`(let ([v0 (corefn-access v k)])
+                      (corefn-case-clause (v0 v vs ...) [(x (o k/x ...) ps ...) clause* ...]))]
+                [(_ (v vs ...) [((n p) ps ...) clause* ...]) (identifier? #'n)
+                  #'(let ([n v]) (corefn-case-clause (v vs ...) [(p ps ...) clause* ...]))]
+                [(_ (v vs ...) [(p ps ...) clause* ...])
+                  #'(when (equal? v p) (corefn-case-clause (vs ...) [(ps ...) clause* ...]))]))))
 
         (define-syntax (case code)
           (syntax-case code (->)
