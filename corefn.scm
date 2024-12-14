@@ -509,7 +509,7 @@
                     [identifier (car xs)])
                 (string->symbol (string-append module-prefix identifier)))]
           [`(application ,abstraction ,expression) (list (loop abstraction) (loop expression))]
-          [`(abstraction ,(x (string->symbol x) x) ,body) `(lambda (,x) ,(loop body))]
+          [`(abstraction ,(x (string->symbol x) x) ,body) `(-> ,x ,(loop body))]
           [`(bind ,(x (string->symbol x) x) ,e ,body)
               (let inner-loop ([body body] [acc (list (list x (loop e)))])
                 (match body
@@ -565,7 +565,7 @@
                         (include ,(string-append (path-root module-path) ".scm")))
                       (import (prefix foreign-module ,(string->symbol module-prefix))))
                     '())
-                (import (only (chezscheme) define lambda let let* letrec)
+                (import (only (chezscheme) define let let* letrec)
                         (only (prim) -> define-newtype-constructor define-data-constructor case object array data access update)
                         ,@(map (lambda (x) (list (string->symbol x))) (sort string<? (map module-name->dotted imports))))
                 ,@(map
@@ -650,7 +650,9 @@
 
         (import (except (chezscheme) case))
 
-        (define-syntax (-> code) (syntax-error code "misplaced aux keyword"))
+        (define-syntax ->
+          (syntax-rules ()
+            [(_ arg body) (lambda (arg) body)]))
 
         (define is-newtype)
 
@@ -718,8 +720,7 @@
                                     [(ps (t -> e) (t* -> e*) ...) #`(corefn-case-clause (#,@u*) (ps (t -> (#,k e)) (t* -> (#,k e*)) ...))]))
                                 #'(clause+ ...)))))))]))
 
-        (define-syntax data
-          (syntax-rules () [(_ name args ...) (vector 'name args ...)]))
+        (define-syntax (data code) (syntax-error code "misplaced aux keyword"))
 
         (define-syntax array
           (syntax-rules ()
