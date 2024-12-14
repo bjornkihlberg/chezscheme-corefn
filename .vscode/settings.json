@@ -1,0 +1,14 @@
+{
+  "files.exclude": {
+    "**/.psc-ide-port": true,
+    "**/.purs-repl": true,
+  },
+  "purescript.codegenTargets": [
+    "corefn"
+  ],
+  "explorer.fileNesting.enabled": true,
+  "explorer.fileNesting.expand": false,
+  "explorer.fileNesting.patterns": {
+    "*.scm": "${capture}.so, ${capture}.wpo",
+  }
+}
