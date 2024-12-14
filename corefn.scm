@@ -452,19 +452,20 @@
           [exports (vector->list (cdr (assert (assoc "exports" corefn))))]
           [declarations (let loop ([decls (vector->list (cdr (assert (assoc "decls" corefn))))] [acc '()])
                           (if (null? decls)
-                              acc
-                              (let ([expression (cdr (assert (assoc "expression" (car decls))))])
-                                (if (char=? (string-ref (cdr (assert (assoc "bindType" (car decls)))) 0) #\N)
-                                    (loop (cdr decls)
-                                          (let ([meta-ann (cdr (assert (assoc "meta" (cdr (assert (assoc "annotation" expression))))))]
-                                                [id (cdr (assert (assoc "identifier" (car decls))))])
-                                            (let ([meta-type (cond [(and (not (eq? meta-ann 'null)) (assoc "metaType" meta-ann)) => cdr] [else #f])])
-                                              (case meta-type
-                                                ["IsNewtype"
-                                                  (cons (list id '(newtype))
-                                                        acc)]
-                                                [else (cons (list id (json-corefn-expression->scheme-corefn expression)) acc)]))))
-                                    (loop (append (vector->list (cdr (assert (assoc "binds" (car decls))))) (cdr decls)) acc)))))])
+                              (reverse acc)
+                              (let ([bind-type (assoc "bindType" (car decls))])
+                                (if (and bind-type (string=? (cdr bind-type) "Rec"))
+                                    (loop (append (vector->list (cdr (assert (assoc "binds" (car decls))))) (cdr decls)) acc)
+                                    (let ([expression (cdr (assert (assoc "expression" (car decls))))])
+                                      (loop (cdr decls)
+                                        (let ([meta-ann (cdr (assert (assoc "meta" (cdr (assert (assoc "annotation" expression))))))]
+                                              [id (cdr (assert (assoc "identifier" (car decls))))])
+                                          (let ([meta-type (cond [(and (not (eq? meta-ann 'null)) (assoc "metaType" meta-ann)) => cdr] [else #f])])
+                                            (case meta-type
+                                              ["IsNewtype"
+                                                (cons (list id '(newtype))
+                                                      acc)]
+                                              [else (cons (list id (json-corefn-expression->scheme-corefn expression)) acc)])))))))))])
       (let ([imports (filter (lambda (x) (and (not (equal? x '("Prim"))) (not (equal? x module-name)))) (vector->list (vector-map (lambda (x) (vector->list (cdr (assert (assoc "moduleName" x))))) (cdr (assert (assoc "imports" corefn))))))])
         `(corefn-module
           ,module-name
@@ -576,7 +577,7 @@
                     (sort (lambda (x y) (string<? (car x) (car y))) data-declarations))
                 ,@(map
                     (lambda (x) (function-declaration->scheme module-prefix x))
-                    (sort (lambda (x y) (string<? (car x) (car y))) declarations))))))))
+                    declarations)))))))
 
   (define (put-corefn-library corefn-library textual-output-port)
     (let ([case-fmt  (pretty-format 'case)]
