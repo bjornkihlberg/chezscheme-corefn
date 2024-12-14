@@ -538,14 +538,12 @@
 
   (define (data-declaration->scheme module-prefix corefn)
     (let ([name (string->symbol (string-append module-prefix (car corefn)))]
-          [args (map string->symbol (cddadr corefn))])
-      (cond [(null? args) `(define ,name (data ,name))]
-            [(= (length args) 1) `(define ,name (lambda (,(car args)) (data ,name ,(car args))))]
-            [else `(define ,name (lambda ,args (data ,name ,@args)))])))
+          [arg-names (cddadr corefn)])
+      `(define-data-constructor ,name ,(length arg-names))))
 
   (define (newtype-declaration->scheme module-prefix corefn)
     (let ([name (string->symbol (string-append module-prefix (car corefn)))])
-      `(define-newtype ,name)))
+      `(define-newtype-constructor ,name)))
 
   (define (corefn->library corefn)
     (let ([corefn (json-corefn->scheme-corefn corefn)])
@@ -568,7 +566,7 @@
                       (import (prefix foreign-module ,(string->symbol module-prefix))))
                     '())
                 (import (only (chezscheme) define lambda let let* letrec)
-                        (only (prim) define-newtype -> case object array data access update)
+                        (only (prim) -> define-newtype-constructor define-data-constructor case object array data access update)
                         ,@(map (lambda (x) (list (string->symbol x))) (sort string<? (map module-name->dotted imports))))
                 ,@(map
                     (lambda (x) (newtype-declaration->scheme module-prefix x))
@@ -635,8 +633,10 @@
                               (let ([s (call-with-string-output-port (lambda (sop) (pretty-print e sop)))])
                                 (put-string textual-output-port s 0 (sub1 (string-length s))))
                               (put-char textual-output-port #\))]
-                          [`(define-newtype ,x)
-                            (format textual-output-port "\n\n  (define-newtype ~s)" x)]
+                          [`(define-data-constructor ,x ,arg-length)
+                            (format textual-output-port "\n\n  (define-data-constructor ~s ~s)" x arg-length)]
+                          [`(define-newtype-constructor ,x)
+                            (format textual-output-port "\n\n  (define-newtype-constructor ~s)" x)]
                           [else (assert #f)])
             definitions))
         (put-char textual-output-port #\))
@@ -646,7 +646,7 @@
 
   (define prim-library
     '(library (prim)
-        (export -> define-newtype case object array data access update)
+        (export -> define-newtype-constructor define-data-constructor case object array data access update)
 
         (import (except (chezscheme) case))
 
@@ -654,7 +654,13 @@
 
         (define is-newtype)
 
-        (define-syntax define-newtype
+        (define-syntax (define-data-constructor code)
+          (syntax-case code ()
+            [(_ name n)
+              (with-syntax ([(args ...) (generate-temporaries (iota (datum n)))])
+                #'(define (name args ...) (vector 'name args ...)))]))
+
+        (define-syntax define-newtype-constructor
           (syntax-rules ()
             [(_ name)
               (begin
