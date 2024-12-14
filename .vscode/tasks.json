@@ -6,7 +6,7 @@
       "type": "shell",
       "command": "scheme",
       "args": [
-        "--program",
+        "--script",
         "build.repl.scm",
       ],
       "group": "none",
@@ -22,6 +22,8 @@
       "type": "shell",
       "command": "scheme",
       "args": [
+        "--libdirs",
+        ".:./output",
         "--program",
         "scratchpad.repl.scm",
       ],
