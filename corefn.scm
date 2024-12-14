@@ -508,8 +508,8 @@
           [`(variable ,@(xs (reverse xs) xs))
               (let ([module-prefix (module-name->prefix (reverse (cdr xs)))]
                     [identifier (car xs)])
-                (list '%ref (string->symbol (string-append module-prefix identifier))))]
-          [`(application ,abstraction ,expression) (list '%app (loop abstraction) (loop expression))]
+                (list '%ref 'src (string->symbol (string-append module-prefix identifier))))]
+          [`(application ,abstraction ,expression) (list '%app 'src (loop abstraction) (loop expression))]
           [`(abstraction ,(x (string->symbol x) x) ,body) `(-> ,x ,(loop body))]
           [`(bind ,(x (string->symbol x) x) ,e ,body)
               (let inner-loop ([body body] [acc (list (list x (loop e)))])
@@ -566,9 +566,10 @@
                         (include ,(string-append (path-root module-path) ".scm")))
                       (import (prefix foreign-module ,(string->symbol module-prefix))))
                     '())
-                (import (only (chezscheme) define let let* letrec)
+                (import (only (chezscheme) define let let* letrec define-syntax make-compile-time-value)
                         (only (prim) %app %ref -> define-newtype-constructor define-data-constructor case object array data access update)
                         ,@(map (lambda (x) (list (string->symbol x))) (sort string<? (map module-name->dotted imports))))
+                (define-syntax src (make-compile-time-value ,module-path))
                 ,@(map
                     (lambda (x) (newtype-declaration->scheme module-prefix x))
                     (sort (lambda (x y) (string<? (car x) (car y))) newtype-declarations))
@@ -588,12 +589,12 @@
       (pretty-format 'array  '(_ e 6 ...))
       (pretty-format 'case   '(_ (_ ...) 1 (alt [bracket (_ ...) '-> _]
                                                 [bracket (_ ...) 1 [bracket _ '-> _] ...]) ...))
-      (let-values ([(name exports core-import foreign-module foreign-import import0 imports definitions)
+      (let-values ([(name exports core-import foreign-module foreign-import import0 imports src definitions)
                       (match corefn-library
-                        [`(library ,name (export ,@exports) (import ,@core-import) (module ,@foreign-module) (import ,@foreign-import) (import ,import0 ,@imports) ,@definitions)
-                            (values name exports (cons 'import core-import) (cons 'module foreign-module) (cons 'import foreign-import) import0 imports definitions)]
-                        [`(library ,name (export ,@exports) (import ,import0 ,@imports) ,@definitions)
-                            (values name exports #f #f #f import0 imports definitions)])])
+                        [`(library ,name (export ,@exports) (import ,@core-import) (module ,@foreign-module) (import ,@foreign-import) (import ,import0 ,@imports) ,src ,@definitions)
+                            (values name exports (cons 'import core-import) (cons 'module foreign-module) (cons 'import foreign-import) import0 imports src definitions)]
+                        [`(library ,name (export ,@exports) (import ,import0 ,@imports) ,src ,@definitions)
+                            (values name exports #f #f #f import0 imports src definitions)])])
         (put-string textual-output-port "#!chezscheme\n\n(library ")
         (put-datum textual-output-port name)
         (put-char textual-output-port #\newline)
@@ -627,6 +628,7 @@
             (put-datum textual-output-port import))
           imports)
         (put-char textual-output-port #\))
+        (format textual-output-port "\n\n  ~s" src)
         (parameterize ([pretty-initial-indent 4])
           (for-each
             (match-lambda [`(define ,x ,e)
@@ -672,11 +674,11 @@
 
         (define-syntax %app
           (syntax-rules ()
-            [(_ f x) (f x)]))
+            [(_ src f x) (f x)]))
 
         (define-syntax %ref
           (syntax-rules ()
-            [(_ x) x]))
+            [(_ src x) x]))
 
         (define-syntax corefn-case-clause
           (lambda (code)
