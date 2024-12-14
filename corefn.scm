@@ -382,10 +382,18 @@
   (define (json-corefn-expression->scheme-corefn corefn)
     (let ([type (cdr (assert (assoc "type" corefn)))])
       (case (string (string-ref type 0) (string-ref type 1))
-        ["Va" (let* ([value (cdr (assert (assoc "value" corefn)))] [moduleName (assoc "moduleName" value)])
-                `(variable
-                  ,@(if moduleName (vector->list (cdr moduleName)) '())
-                  ,(cdr (assert (assoc "identifier" value)))))]
+        ["Va" (let ([value (cdr (assert (assoc "value" corefn)))]
+                    [sourceSpan (cdr (assert (assoc "sourceSpan" (cdr (assert (assoc "annotation" corefn))))))])
+                (let ([moduleName (assoc "moduleName" value)]
+                      [sourcePos (assoc "sourcePos" value)]
+                      [sourceStart (cdr (assert (assoc "start" sourceSpan)))]
+                      [sourceEnd (cdr (assert (assoc "end" sourceSpan)))])
+                  `(variable
+                    ,(if (and (not (equal? sourceStart '#(0 0))) (not (equal? sourceEnd '#(0 0))) (or moduleName (and sourcePos (not (equal? (cdr sourcePos) '#(0 0))))))
+                      `(,@(vector->list sourceStart) ,@(vector->list sourceEnd))
+                      #f)
+                    ,(if moduleName (vector->list (cdr moduleName)) '())
+                    ,(cdr (assert (assoc "identifier" value))))))]
         ["Li" (let ([value (cdr (assert (assoc "value" corefn)))])
                 (let ([literalType (cdr (assert (assoc "literalType" value)))]
                       [value (cdr (assert (assoc "value" value)))])
@@ -407,9 +415,15 @@
         ["Ab" `(abstraction
                 ,(cdr (assert (assoc "argument" corefn)))
                 ,(json-corefn-expression->scheme-corefn (cdr (assert (assoc "body" corefn)))))]
-        ["Ap" `(application
-                ,(json-corefn-expression->scheme-corefn (cdr (assert (assoc "abstraction" corefn))))
-                ,(json-corefn-expression->scheme-corefn (cdr (assert (assoc "argument" corefn)))))]
+        ["Ap" (let ([sourceSpan (cdr (assert (assoc "sourceSpan" (cdr (assert (assoc "annotation" corefn))))))])
+                (let ([sourceStart (cdr (assert (assoc "start" sourceSpan)))]
+                      [sourceEnd (cdr (assert (assoc "end" sourceSpan)))])
+                  `(application
+                    ,(if (and (not (equal? sourceStart '#(0 0))) (not (equal? sourceEnd '#(0 0))))
+                      `(,@(vector->list sourceStart) ,@(vector->list sourceEnd))
+                      #f)
+                    ,(json-corefn-expression->scheme-corefn (cdr (assert (assoc "abstraction" corefn))))
+                    ,(json-corefn-expression->scheme-corefn (cdr (assert (assoc "argument" corefn)))))))]
         ["Ca" `(case
                 ,(vector->list (vector-map json-corefn-expression->scheme-corefn (cdr (assert (assoc "caseExpressions" corefn)))))
                 ,@(vector->list
@@ -505,11 +519,10 @@
       ,(string->symbol (string-append module-prefix (car corefn)))
       ,(let loop ([corefn (cadr corefn)])
         (match corefn
-          [`(variable ,@(xs (reverse xs) xs))
-              (let ([module-prefix (module-name->prefix (reverse (cdr xs)))]
-                    [identifier (car xs)])
-                (list '%ref 'src (string->symbol (string-append module-prefix identifier))))]
-          [`(application ,abstraction ,expression) (list '%app 'src (loop abstraction) (loop expression))]
+          [`(variable ,source-location ,(xs (module-name->prefix xs) module-prefix) ,identifier)
+              (list '%ref 'src source-location (string->symbol (string-append module-prefix identifier)))]
+          [`(application ,source-location ,abstraction ,expression)
+              (list '%app 'src source-location (loop abstraction) (loop expression))]
           [`(abstraction ,(x (string->symbol x) x) ,body) `(-> ,x ,(loop body))]
           [`(bind ,(x (string->symbol x) x) ,e ,body)
               (let inner-loop ([body body] [acc (list (list x (loop e)))])
@@ -583,6 +596,8 @@
   (define (put-corefn-library corefn-library textual-output-port)
     (let ([case-fmt  (pretty-format 'case)]
           [array-fmt (pretty-format 'array)])
+      (pretty-format '%app   '(_ var e 5 e 5 e))
+      (pretty-format '%ref   '(_ var e e))
       (pretty-format '->     '(_ var body))
       (pretty-format 'object '(_ [bracket x e] 7 ...))
       (pretty-format 'update '(_ _ [bracket x e] 7 ...))
@@ -674,11 +689,11 @@
 
         (define-syntax %app
           (syntax-rules ()
-            [(_ src f x) (f x)]))
+            [(_ src span f x) (f x)]))
 
         (define-syntax %ref
           (syntax-rules ()
-            [(_ src x) x]))
+            [(_ src span x) x]))
 
         (define-syntax corefn-case-clause
           (lambda (code)
