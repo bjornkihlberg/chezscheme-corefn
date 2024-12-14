@@ -17,7 +17,7 @@ main _ = 7
 
 #### `build.scm`
 
-```scheme
+```lisp
 (import (only (corefn) transpile-corefn-output-folder))
 
 (define output-dir "./output")
@@ -45,7 +45,7 @@ $ scheme --script build.scm
 
 #### `app.scm`
 
-```scheme
+```lisp
 (import (chezscheme)
         (Main))
 
