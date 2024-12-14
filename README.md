@@ -26,7 +26,7 @@ main _ = 7
 
 (assert (zero? (system (format "cp ./prim.scm ~a" output-dir))))
 
-(assert (zero? (system (format "purs compile -o ~a -g corefn --source-globs-file ./sourcefiles.repl.txt" output-dir))))
+(assert (zero? (system (format "purs compile -o ~a -g corefn --source-globs-file ./sourcefiles.txt" output-dir))))
 
 (transpile-corefn-output-folder output-dir)
 
