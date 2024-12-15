@@ -65,7 +65,7 @@
           [(_ (v vs ...) [((o) ps ...) clause* ...]) (and (identifier? #'o) (free-identifier=? #'o #'object))
             #'(corefn-case-clause (vs ...) [(ps ...) clause* ...])]
           [(m (v vs ...) [((o [k x] k/x ...) ps ...) clause* ...]) (and (identifier? #'o) (free-identifier=? #'o #'object))
-            #`(let ([v0 (corefn-access v k)])
+            #`(let ([v0 (access v k)])
                 (corefn-case-clause (v0 v vs ...) [(x (o k/x ...) ps ...) clause* ...]))]
           [(_ (v vs ...) [((n p) ps ...) clause* ...]) (identifier? #'n)
             #'(let ([n v]) (corefn-case-clause (v vs ...) [(p ps ...) clause* ...]))]

@@ -420,7 +420,9 @@
            data-binder
            make-data-binder
            array-binder
-           make-array-binder)
+           make-array-binder
+           object-binder
+           make-object-binder)
 
     (define-record-type corefn)
 
@@ -469,6 +471,19 @@
                     (assert (vector? binders))
                     ((new) binders)))])
 
+    (define-record-type object-binder
+      [parent corefn]
+      [fields binders]
+      [protocol (lambda (new)
+                  (lambda (binders)
+                    (assert (vector? binders))
+                    (vector-for-each
+                      (lambda (binder)
+                        (assert (pair? binder))
+                        (assert (string? (car binder))))
+                      binders)
+                    ((new) binders)))])
+
     (record-writer
       (record-type-descriptor corefn)
       (lambda (r p wr)
@@ -499,7 +514,9 @@
           ["ArrayLiteral"
             (make-array-binder (vector-map json-corefn-binder->scheme-corefn value))]
 
-          ["ObjectLiteral" `(object ,@(vector->list (vector-map (lambda (corefn) (list (vector-ref corefn 0) (json-corefn-binder->scheme-corefn (vector-ref corefn 1)))) value)))]
+          ["ObjectLiteral"
+            (make-object-binder (vector-map (lambda (kv) (cons (vector-ref kv 0) (json-corefn-binder->scheme-corefn (vector-ref kv 1)))) value))]
+
           ["CharLiteral" (string-ref value 0)]
           ["NumericLiteral" (if (fixnum? value) (fixnum->flonum value) value)]
           [else value])]
@@ -646,8 +663,8 @@
       [(record null-binder)
         '_]
 
-      [`(object ,@k/v*)
-          `(object ,@(map (lambda (k/v) (list (car k/v) (corefn-case-binding->scheme (cadr k/v)))) k/v*))]
+      [(record object-binder binders)
+        `(object ,@(vector->list (vector-map (lambda (k/v) (list (car k/v) (corefn-case-binding->scheme (cdr k/v)))) binders)))]
 
       [(record array-binder binders)
         `(array ,@(vector->list (vector-map corefn-case-binding->scheme binders)))]
