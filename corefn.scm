@@ -302,7 +302,7 @@
               (monad parser-flat-map
                 (<- k (parser-satisfies string?))
                 (<- v parse-json-datum)
-                (parser-pure (cons k v)))])
+                (parser-pure (cons (string->symbol k) v)))])
         (parser-alt
           (parser-satisfies (lambda (token)
                               (or (string? token)
@@ -372,45 +372,45 @@
         [(_ clause clause* ...) (lambda (arg) (match arg clause clause* ...))])))
 
   (define (json-corefn-binder->scheme-corefn corefn)
-    (let ([binder-type (cdr (assert (assoc "binderType" corefn)))])
+    (let ([binder-type (cdr (assert (assq 'binderType corefn)))])
       (case (string (string-ref binder-type 0) (string-ref binder-type 1))
-        ["Va" `(variable ,(cdr (assert (assoc "identifier" corefn))))]
+        ["Va" `(variable ,(cdr (assert (assq 'identifier corefn))))]
         ["Nu" '_]
-        ["Li" (let* ([literal (cdr (assert (assoc "literal" corefn)))] [value (cdr (assert (assoc "value" literal)))])
-                (case (string-ref (cdr (assert (assoc "literalType" literal))) 0)
+        ["Li" (let* ([literal (cdr (assert (assq 'literal corefn)))] [value (cdr (assert (assq 'value literal)))])
+                (case (string-ref (cdr (assert (assq 'literalType literal))) 0)
                   [#\A `(array ,@(vector->list (vector-map json-corefn-binder->scheme-corefn value)))]
                   [#\O `(object ,@(vector->list (vector-map (lambda (corefn) (list (vector-ref corefn 0) (json-corefn-binder->scheme-corefn (vector-ref corefn 1)))) value)))]
                   [#\C (string-ref value 0)]
                   [#\N (if (fixnum? value) (fixnum->flonum value) value)]
                   [else value]))]
-        ["Co" (let ([corefn (cdr (assert (assoc "constructorName" corefn)))]
-                    [binders (cdr (assert (assoc "binders" corefn)))])
+        ["Co" (let ([corefn (cdr (assert (assq 'constructorName corefn)))]
+                    [binders (cdr (assert (assq 'binders corefn)))])
                 `(data
-                  ,(vector->list (cdr (assert (assoc "moduleName" corefn))))
-                  ,(cdr (assert (assoc "identifier" corefn)))
+                  ,(vector->list (cdr (assert (assq 'moduleName corefn))))
+                  ,(cdr (assert (assq 'identifier corefn)))
                   ,@(vector->list (vector-map json-corefn-binder->scheme-corefn binders))))]
         ["Na" `(named
-                ,(cdr (assert (assoc "identifier" corefn)))
-                ,(json-corefn-binder->scheme-corefn (cdr (assert (assoc "binder" corefn)))))])))
+                ,(cdr (assert (assq 'identifier corefn)))
+                ,(json-corefn-binder->scheme-corefn (cdr (assert (assq 'binder corefn)))))])))
 
   (define (json-corefn-expression->scheme-corefn corefn)
-    (let ([type (cdr (assert (assoc "type" corefn)))])
+    (let ([type (cdr (assert (assq 'type corefn)))])
       (case (string (string-ref type 0) (string-ref type 1))
-        ["Va" (let ([value (cdr (assert (assoc "value" corefn)))]
-                    [sourceSpan (cdr (assert (assoc "sourceSpan" (cdr (assert (assoc "annotation" corefn))))))])
-                (let ([moduleName (assoc "moduleName" value)]
-                      [sourcePos (assoc "sourcePos" value)]
-                      [sourceStart (cdr (assert (assoc "start" sourceSpan)))]
-                      [sourceEnd (cdr (assert (assoc "end" sourceSpan)))])
+        ["Va" (let ([value (cdr (assert (assq 'value corefn)))]
+                    [sourceSpan (cdr (assert (assq 'sourceSpan (cdr (assert (assq 'annotation corefn))))))])
+                (let ([moduleName (assq 'moduleName value)]
+                      [sourcePos (assq 'sourcePos value)]
+                      [sourceStart (cdr (assert (assq 'start sourceSpan)))]
+                      [sourceEnd (cdr (assert (assq 'end sourceSpan)))])
                   `(variable
                     ,(if (and (not (equal? sourceStart '#(0 0))) (not (equal? sourceEnd '#(0 0))) (or moduleName (and sourcePos (not (equal? (cdr sourcePos) '#(0 0))))))
                       `(,@(vector->list sourceStart) ,@(vector->list sourceEnd))
                       #f)
                     ,(if moduleName (vector->list (cdr moduleName)) '())
-                    ,(cdr (assert (assoc "identifier" value))))))]
-        ["Li" (let ([value (cdr (assert (assoc "value" corefn)))])
-                (let ([literalType (cdr (assert (assoc "literalType" value)))]
-                      [value (cdr (assert (assoc "value" value)))])
+                    ,(cdr (assert (assq 'identifier value))))))]
+        ["Li" (let ([value (cdr (assert (assq 'value corefn)))])
+                (let ([literalType (cdr (assert (assq 'literalType value)))]
+                      [value (cdr (assert (assq 'value value)))])
                   (case (string-ref literalType 0)
                     [#\C (string-ref value 0)]
                     [#\A `(array ,@(vector->list (vector-map json-corefn-expression->scheme-corefn value)))]
@@ -418,83 +418,83 @@
                     [#\N (if (fixnum? value) (fixnum->flonum value) value)]
                     [else value])))]
         ["Co" `(data
-                ,(cdr (assert (assoc "constructorName" corefn)))
-                ,@(vector->list (cdr (assert (assoc "fieldNames" corefn)))))]
+                ,(cdr (assert (assq 'constructorName corefn)))
+                ,@(vector->list (cdr (assert (assq 'fieldNames corefn)))))]
         ["Ac" `(access
-                ,(json-corefn-expression->scheme-corefn (cdr (assert (assoc "expression" corefn))))
-                ,(cdr (assert (assoc "fieldName" corefn))))]
+                ,(json-corefn-expression->scheme-corefn (cdr (assert (assq 'expression corefn))))
+                ,(cdr (assert (assq 'fieldName corefn))))]
         ["Ob" `(update
-                ,(json-corefn-expression->scheme-corefn (cdr (assert (assoc "expression" corefn))))
-                ,(vector->list (vector-map (lambda (corefn) (list (vector-ref corefn 0) (json-corefn-expression->scheme-corefn (vector-ref corefn 1)))) (cdr (assert (assoc "updates" corefn))))))]
+                ,(json-corefn-expression->scheme-corefn (cdr (assert (assq 'expression corefn))))
+                ,(vector->list (vector-map (lambda (corefn) (list (vector-ref corefn 0) (json-corefn-expression->scheme-corefn (vector-ref corefn 1)))) (cdr (assert (assq 'updates corefn))))))]
         ["Ab" `(abstraction
-                ,(cdr (assert (assoc "argument" corefn)))
-                ,(json-corefn-expression->scheme-corefn (cdr (assert (assoc "body" corefn)))))]
-        ["Ap" (let ([sourceSpan (cdr (assert (assoc "sourceSpan" (cdr (assert (assoc "annotation" corefn))))))])
-                (let ([sourceStart (cdr (assert (assoc "start" sourceSpan)))]
-                      [sourceEnd (cdr (assert (assoc "end" sourceSpan)))])
+                ,(cdr (assert (assq 'argument corefn)))
+                ,(json-corefn-expression->scheme-corefn (cdr (assert (assq 'body corefn)))))]
+        ["Ap" (let ([sourceSpan (cdr (assert (assq 'sourceSpan (cdr (assert (assq 'annotation corefn))))))])
+                (let ([sourceStart (cdr (assert (assq 'start sourceSpan)))]
+                      [sourceEnd (cdr (assert (assq 'end sourceSpan)))])
                   `(application
                     ,(if (and (not (equal? sourceStart '#(0 0))) (not (equal? sourceEnd '#(0 0))))
                       `(,@(vector->list sourceStart) ,@(vector->list sourceEnd))
                       #f)
-                    ,(json-corefn-expression->scheme-corefn (cdr (assert (assoc "abstraction" corefn))))
-                    ,(json-corefn-expression->scheme-corefn (cdr (assert (assoc "argument" corefn)))))))]
+                    ,(json-corefn-expression->scheme-corefn (cdr (assert (assq 'abstraction corefn))))
+                    ,(json-corefn-expression->scheme-corefn (cdr (assert (assq 'argument corefn)))))))]
         ["Ca" `(case
-                ,(vector->list (vector-map json-corefn-expression->scheme-corefn (cdr (assert (assoc "caseExpressions" corefn)))))
+                ,(vector->list (vector-map json-corefn-expression->scheme-corefn (cdr (assert (assq 'caseExpressions corefn)))))
                 ,@(vector->list
                     (vector-map
                       (lambda (corefn)
-                        (let ([binders (vector->list (vector-map json-corefn-binder->scheme-corefn (cdr (assert (assoc "binders" corefn)))))])
-                          (if (cdr (assert (assoc "isGuarded" corefn)))
+                        (let ([binders (vector->list (vector-map json-corefn-binder->scheme-corefn (cdr (assert (assq 'binders corefn)))))])
+                          (if (cdr (assert (assq 'isGuarded corefn)))
                             (list binders #t
                               (vector->list
                                 (vector-map
                                   (lambda (corefn)
                                     (list
-                                      (json-corefn-expression->scheme-corefn (cdr (assert (assoc "guard" corefn))))
-                                      (json-corefn-expression->scheme-corefn (cdr (assert (assoc "expression" corefn))))))
-                                  (cdr (assert (assoc "expressions" corefn))))))
-                            (list binders #f (json-corefn-expression->scheme-corefn (cdr (assert (assoc "expression" corefn))))))))
-                      (cdr (assert (assoc "caseAlternatives" corefn))))))]
-        ["Le" (let loop ([binds (vector->list (cdr (assert (assoc "binds" corefn))))])
+                                      (json-corefn-expression->scheme-corefn (cdr (assert (assq 'guard corefn))))
+                                      (json-corefn-expression->scheme-corefn (cdr (assert (assq 'expression corefn))))))
+                                  (cdr (assert (assq 'expressions corefn))))))
+                            (list binders #f (json-corefn-expression->scheme-corefn (cdr (assert (assq 'expression corefn))))))))
+                      (cdr (assert (assq 'caseAlternatives corefn))))))]
+        ["Le" (let loop ([binds (vector->list (cdr (assert (assq 'binds corefn))))])
                 (if (null? binds)
-                    (json-corefn-expression->scheme-corefn (cdr (assert (assoc "expression" corefn))))
-                    (if (char=? (string-ref (cdr (assert (assoc "bindType" (car binds)))) 0) #\N)
+                    (json-corefn-expression->scheme-corefn (cdr (assert (assq 'expression corefn))))
+                    (if (char=? (string-ref (cdr (assert (assq 'bindType (car binds)))) 0) #\N)
                         `(bind
-                          ,(cdr (assert (assoc "identifier" (car binds))))
-                          ,(json-corefn-expression->scheme-corefn (cdr (assert (assoc "expression" (car binds)))))
+                          ,(cdr (assert (assq 'identifier (car binds))))
+                          ,(json-corefn-expression->scheme-corefn (cdr (assert (assq 'expression (car binds)))))
                           ,(loop (cdr binds)))
                         `(bindrec
                           ,(vector->list
                             (vector-map
                               (lambda (bind)
-                                (list (cdr (assert (assoc "identifier" bind)))
-                                      (json-corefn-expression->scheme-corefn (cdr (assert (assoc "expression" bind))))))
-                              (cdr (assert (assoc "binds" (car binds))))))
+                                (list (cdr (assert (assq 'identifier bind)))
+                                      (json-corefn-expression->scheme-corefn (cdr (assert (assq 'expression bind))))))
+                              (cdr (assert (assq 'binds (car binds))))))
                           ,(loop (cdr binds))))))])))
 
   (define (json-corefn->scheme-corefn corefn)
-    (let ([re-exports (map (lambda (x) (cons (car x) (vector->list (cdr x)))) (cdr (assert (assoc "reExports" corefn))))]
-          [module-path (cdr (assert (assoc "modulePath" corefn)))]
-          [module-name (vector->list (cdr (assert (assoc "moduleName" corefn))))]
-          [foreign-imports (vector->list (cdr (assert (assoc "foreign" corefn))))]
-          [exports (vector->list (cdr (assert (assoc "exports" corefn))))]
-          [declarations (let loop ([decls (vector->list (cdr (assert (assoc "decls" corefn))))] [acc '()])
+    (let ([re-exports (map (lambda (x) (cons (car x) (vector->list (cdr x)))) (cdr (assert (assq 'reExports corefn))))]
+          [module-path (cdr (assert (assq 'modulePath corefn)))]
+          [module-name (vector->list (cdr (assert (assq 'moduleName corefn))))]
+          [foreign-imports (vector->list (cdr (assert (assq 'foreign corefn))))]
+          [exports (vector->list (cdr (assert (assq 'exports corefn))))]
+          [declarations (let loop ([decls (vector->list (cdr (assert (assq 'decls corefn))))] [acc '()])
                           (if (null? decls)
                               (reverse acc)
-                              (let ([bind-type (assoc "bindType" (car decls))])
+                              (let ([bind-type (assq 'bindType (car decls))])
                                 (if (and bind-type (string=? (cdr bind-type) "Rec"))
-                                    (loop (append (vector->list (cdr (assert (assoc "binds" (car decls))))) (cdr decls)) acc)
-                                    (let ([expression (cdr (assert (assoc "expression" (car decls))))])
+                                    (loop (append (vector->list (cdr (assert (assq 'binds (car decls))))) (cdr decls)) acc)
+                                    (let ([expression (cdr (assert (assq 'expression (car decls))))])
                                       (loop (cdr decls)
-                                        (let ([meta-ann (cdr (assert (assoc "meta" (cdr (assert (assoc "annotation" expression))))))]
-                                              [id (cdr (assert (assoc "identifier" (car decls))))])
-                                          (let ([meta-type (cond [(and (not (eq? meta-ann 'null)) (assoc "metaType" meta-ann)) => cdr] [else #f])])
+                                        (let ([meta-ann (cdr (assert (assq 'meta (cdr (assert (assq 'annotation expression))))))]
+                                              [id (cdr (assert (assq 'identifier (car decls))))])
+                                          (let ([meta-type (cond [(and (not (eq? meta-ann 'null)) (assq 'metaType meta-ann)) => cdr] [else #f])])
                                             (case meta-type
                                               ["IsNewtype"
                                                 (cons (list id '(newtype))
                                                       acc)]
                                               [else (cons (list id (json-corefn-expression->scheme-corefn expression)) acc)])))))))))])
-      (let ([imports (filter (lambda (x) (and (not (equal? x '("Prim"))) (not (equal? x module-name)))) (vector->list (vector-map (lambda (x) (vector->list (cdr (assert (assoc "moduleName" x))))) (cdr (assert (assoc "imports" corefn))))))])
+      (let ([imports (filter (lambda (x) (and (not (equal? x '("Prim"))) (not (equal? x module-name)))) (vector->list (vector-map (lambda (x) (vector->list (cdr (assert (assq 'moduleName x))))) (cdr (assert (assq 'imports corefn))))))])
         `(corefn-module
           ,module-name
           ,module-path
