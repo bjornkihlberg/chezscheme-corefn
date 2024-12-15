@@ -33,9 +33,21 @@
     (syntax-rules ()
       [(_ src span f x) (f x)]))
 
-  (define-syntax %ref
-    (syntax-rules ()
-      [(_ src span x) x]))
+  (meta define (identifier-path module-name name)
+    (datum->syntax name
+      (string->symbol
+        (apply
+          string-append
+          (reverse
+            (cons (symbol->string (syntax->datum name))
+                  (fold-left
+                    (lambda (acc x) (cons* "." (symbol->string x) acc))
+                    '()
+                    (syntax->datum module-name))))))))
+
+  (define-syntax (%ref code)
+    (syntax-case code ()
+      [(_ src span module-name name) (identifier-path #'module-name #'name)]))
 
   (define-syntax corefn-case-clause
     (lambda (code)
@@ -52,11 +64,10 @@
           [(_ (v vs ...) [(p ps ...) clause* ...]) (identifier? #'p)
             #'(let ([p v]) (corefn-case-clause (vs ...) [(ps ...) clause* ...]))]
           [(_ (v vs ...) [((d module-name name xs ...) ps ...) clause* ...]) (and (identifier? #'d) (free-identifier=? #'d #'data))
-            (let tjosan ([data-identifier (string->symbol (apply string-append (reverse (cons (symbol->string (datum name)) (fold-left (lambda (acc x) (cons* "." (symbol->string x) acc)) '() (datum module-name))))))])
-              #`(when (symbol=? (vector-ref v 0) '#,(datum->syntax #'m data-identifier))
-                  (corefn-case-clause
-                    (#,@(map (lambda (i) #`(vector-ref v #,(add1 i))) (iota (length #'(xs ...)))) vs ...)
-                    ((xs ... ps ...) clause* ...))))]
+            #`(when (symbol=? (vector-ref v 0) '#,(identifier-path #'module-name #'name))
+                (corefn-case-clause
+                  (#,@(map (lambda (i) #`(vector-ref v #,(add1 i))) (iota (length #'(xs ...)))) vs ...)
+                  ((xs ... ps ...) clause* ...)))]
           [(_ (v vs ...) [((a xs ...) ps ...) clause* ...]) (and (identifier? #'a) (free-identifier=? #'a #'array))
             (let ([n (length #'(xs ...))])
               #`(when (= (vector-length v) #,n)

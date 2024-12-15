@@ -424,9 +424,43 @@
            object-binder
            make-object-binder
            atomic-binder
-           make-atomic-binder)
+           make-atomic-binder
+           source-location
+           make-source-location
+           source-location-start-line
+           source-location-start-char
+           source-location-end-line
+           source-location-end-char
+           variable-expression
+           make-variable-expression)
 
     (define-record-type corefn)
+
+    (define-record-type source-location
+      [fields start-line start-char end-line end-char]
+      [protocol (lambda (new)
+                  (lambda (start-line start-char end-line end-char)
+                    (assert (fixnum? start-line))
+                    (assert (fxpositive? start-line))
+                    (assert (fixnum? start-char))
+                    (assert (fxpositive? start-char))
+                    (assert (fixnum? end-line))
+                    (assert (fxpositive? end-line))
+                    (assert (fixnum? end-char))
+                    (assert (fxpositive? end-char))
+                    (new start-line start-char end-line end-char)))]
+      [opaque #t])
+
+    (define-record-type variable-expression
+      [parent corefn]
+      [fields module-name source-location identifier]
+      [protocol (lambda (new)
+                  (lambda (module-name source-location identifier)
+                    (assert (vector? module-name))
+                    (vector-for-each (lambda (s) (assert (symbol? s))) module-name)
+                    (when source-location (assert (source-location? source-location)))
+                    (assert (symbol? identifier))
+                    ((new) module-name source-location identifier)))])
 
     (define (binder? e)
       (and
@@ -575,15 +609,21 @@
   ; https://github.com/purescript/purescript/blob/master/src/Language/PureScript/CoreFn/Expr.hs#L15-L55
   (define (json-corefn-expression->scheme-corefn corefn)
     (match corefn
+      ; https://github.com/purescript/purescript/blob/master/src/Language/PureScript/AST/SourcePos.hs#L49-L56
+      ; https://github.com/purescript/purescript/blob/master/src/Language/PureScript/AST/SourcePos.hs#L75-L80
       [(hashtable [type "Var"] value [annotation (hashtable [sourceSpan (hashtable start end)])])
         (let ([moduleName (symbol-hashtable-ref value 'moduleName #f)]
+              ; https://github.com/purescript/purescript/blob/master/src/Language/PureScript/AST/SourcePos.hs#L22-L28
+              ; https://github.com/purescript/purescript/blob/master/src/Language/PureScript/AST/SourcePos.hs#L40-L42
               [sourcePos (symbol-hashtable-ref value 'sourcePos #f)])
-          `(variable
-            ,(if (and (not (equal? start '#(0 0))) (not (equal? end '#(0 0))) (or moduleName (and sourcePos (not (equal? sourcePos '#(0 0))))))
-              `(,@(vector->list start) ,@(vector->list end))
-              #f)
-            ,(if moduleName (vector->list moduleName) '())
-            ,(assert (symbol-hashtable-ref value 'identifier #f))))]
+          (make-variable-expression
+            (if moduleName (vector-map string->symbol moduleName) '#())
+            (and
+              (not (equal? start '#(0 0)))
+              (not (equal? end '#(0 0)))
+              (or moduleName (and sourcePos (not (equal? sourcePos '#(0 0)))))
+              (make-source-location (vector-ref start 0) (vector-ref start 1) (vector-ref end 0) (vector-ref end 1)))
+            (string->symbol (assert (symbol-hashtable-ref value 'identifier #f)))))]
 
       ; https://github.com/purescript/purescript/blob/master/src/Language/PureScript/AST/Literals.hs#L12-L41
       ; https://github.com/purescript/purescript/blob/fc3fa8897916de1a3973de976eaea1fba23b4df9/src/Language/PureScript/CoreFn/ToJSON.hs#L61-L96
@@ -745,8 +785,16 @@
       ,(string->symbol (string-append module-prefix (car corefn)))
       ,(let loop ([corefn (cadr corefn)])
         (match corefn
-          [`(variable ,source-location ,(xs (module-name->prefix xs) module-prefix) ,identifier)
-              (list '%ref 'src source-location (string->symbol (string-append module-prefix identifier)))]
+          [(record variable-expression source-location module-name identifier)
+            (list '%ref 'src
+                  (and
+                    source-location
+                    (list (source-location-start-line source-location)
+                          (source-location-start-char source-location)
+                          (source-location-end-line source-location)
+                          (source-location-end-char source-location)))
+                  (vector->list module-name) identifier)]
+
           [`(application ,source-location ,abstraction ,expression)
               (list '%app 'src source-location (loop abstraction) (loop expression))]
           [`(abstraction ,(x (string->symbol x) x) ,body) `(-> ,x ,(loop body))]
@@ -823,7 +871,7 @@
     (let ([case-fmt  (pretty-format 'case)]
           [array-fmt (pretty-format 'array)])
       (pretty-format '%app   '(_ var (alt (bracket e ...) e) 5 e 5 e))
-      (pretty-format '%ref   '(_ var (alt (bracket e ...) e) e))
+      (pretty-format '%ref   '(_ var (alt (bracket e ...) e) e e))
       (pretty-format '->     '(_ var body))
       (pretty-format 'object '(_ [bracket x e] 7 ...))
       (pretty-format 'update '(_ _ [bracket x e] 7 ...))
