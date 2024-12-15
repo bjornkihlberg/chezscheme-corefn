@@ -418,7 +418,9 @@
            newtype-binder
            make-newtype-binder
            data-binder
-           make-data-binder)
+           make-data-binder
+           array-binder
+           make-array-binder)
 
     (define-record-type corefn)
 
@@ -459,6 +461,14 @@
                     (assert (vector? binders))
                     ((new) module-name identifier binders)))])
 
+    (define-record-type array-binder
+      [parent corefn]
+      [fields binders]
+      [protocol (lambda (new)
+                  (lambda (binders)
+                    (assert (vector? binders))
+                    ((new) binders)))])
+
     (record-writer
       (record-type-descriptor corefn)
       (lambda (r p wr)
@@ -486,7 +496,9 @@
       ; https://github.com/purescript/purescript/blob/master/src/Language/PureScript/AST/Literals.hs#L12-L41
       [(hashtable [binderType "LiteralBinder"] [literal (hashtable value literalType)])
         (case literalType
-          ["ArrayLiteral" `(array ,@(vector->list (vector-map json-corefn-binder->scheme-corefn value)))]
+          ["ArrayLiteral"
+            (make-array-binder (vector-map json-corefn-binder->scheme-corefn value))]
+
           ["ObjectLiteral" `(object ,@(vector->list (vector-map (lambda (corefn) (list (vector-ref corefn 0) (json-corefn-binder->scheme-corefn (vector-ref corefn 1)))) value)))]
           ["CharLiteral" (string-ref value 0)]
           ["NumericLiteral" (if (fixnum? value) (fixnum->flonum value) value)]
@@ -636,8 +648,9 @@
 
       [`(object ,@k/v*)
           `(object ,@(map (lambda (k/v) (list (car k/v) (corefn-case-binding->scheme (cadr k/v)))) k/v*))]
-      [`(array ,@xs)
-          `(array ,@(map corefn-case-binding->scheme xs))]
+
+      [(record array-binder binders)
+        `(array ,@(vector->list (vector-map corefn-case-binding->scheme binders)))]
 
       [(record named-binder identifier binder)
         (list identifier (corefn-case-binding->scheme binder))]
