@@ -19,6 +19,18 @@
                     (format #t "\x1B;[33mdbg: ~s\x1B;[0m\n" x)
                     x)))])))
 
+  (module (hashtable-map-values assq->symbol-hashtable)
+    (define (assq->symbol-hashtable ks/vs)
+      (let ([hashtable (make-hashtable symbol-hash symbol=? (length ks/vs))])
+        (for-each (lambda (k/v) (symbol-hashtable-set! hashtable (car k/v) (cdr k/v))) ks/vs)
+        hashtable))
+
+    (define (hashtable-map-values f hashtable)
+      (let ([result (hashtable-copy hashtable #t)])
+        (let-values ([(ks vs) (hashtable-entries hashtable)])
+          (vector-for-each (lambda (k v) (symbol-hashtable-set! result k (f v))) ks vs)
+          result))))
+
   (module (read-json)
     (module (<- monad)
       (define-syntax (<- code) (syntax-error code "misplaced aux keyword"))
@@ -318,9 +330,7 @@
             (parser-satisfies-eq? #\{)
             (<- content (parser-many parse-key/value))
             (parser-satisfies-eq? #\})
-            (let ([hashtable (make-hashtable symbol-hash symbol=? (length content))])
-              (for-each (lambda (k/v) (symbol-hashtable-set! hashtable (car k/v) (cdr k/v))) content)
-              (parser-pure hashtable))))))
+            (parser-pure (assq->symbol-hashtable content))))))
 
     (define (read-json textual-input-port)
       (parse-json-datum (lex-json-document (input-port->stream textual-input-port))
@@ -330,7 +340,9 @@
               (assertion-violationf 'read-json "Unexpected end")
               (assertion-violationf 'read-json "Unknown token ~s" (stream-car state)))))))
 
-  (module (match match-lambda)
+  (module (match hashtable)
+    (define-syntax (hashtable code) (syntax-error code "misplaced aux keyword"))
+
     (define-syntax (when-match code)
       (syntax-case code (quasiquote unquote unquote-splicing)
         [(_ v p e e* ...) (not (atom? (datum v)))
@@ -342,58 +354,65 @@
         [(_ v p e e* ...) (identifier? #'p)
           #'(let ([p v]) e e* ...)]
 
+        [(_ v (ht clause* ...) e e* ...) (and (identifier? #'ht) (free-identifier=? #'ht #'hashtable))
+          #`(when (symbol-hashtable? v)
+              #,(let loop ([clauses #'(clause* ...)])
+                  (syntax-case clauses ()
+                    [() #'(begin e e* ...)]
+                    [([k p] _ ...) #`(cond [(symbol-hashtable-ref-cell v 'k) => (lambda (k/v) (when-match (cdr k/v) p #,(loop (cdr clauses))))])]
+                    [(k _ ...) #`(cond [(symbol-hashtable-ref-cell v 'k) => (lambda (k/v) (when-match (cdr k/v) k #,(loop (cdr clauses))))])])))]
+
         [(_ v0 (p f y) e e* ...)
-          #'(let ([p v0])
-              (when-match f y e e* ...))]
+          #'(let ([p v0]) (when-match f y e e* ...))]
 
         [(_ v `,p e e* ...)
           #'(when-match v p e e* ...)]
 
         [(_ v `(,@p) e e* ...)
-          #'(when (or (pair? v) (null? v))
-              (when-match v p e e* ...))]
+          #'(when (or (pair? v) (null? v)) (when-match v p e e* ...))]
 
-        [(_ v `(p p* ...) e e* ...)
-          #'(when (pair? v)
-              (let ([v1 (car v)]
-                    [v2 (cdr v)])
-                (when-match v1 `p (when-match v2 `(p* ...) e e* ...))))]
+        [(_ v `(p0 . p1) e e* ...)
+          #'(when (pair? v) (when-match (car v) `p0 (when-match (cdr v) `p1 e e* ...)))]
 
         [(_ v p e e* ...)
           #'(when (equal? v p) e e* ...)]))
 
-    (define-syntax match
-      (syntax-rules ()
+    (define-syntax (match code)
+      (syntax-case code ()
         [(_ v [p e e* ...] ...)
-          (call/1cc
-            (lambda (k)
-              (when-match v p (call-with-values (lambda () e e* ...) k)) ...))]))
+          #`(let ([v0 v])
+              (call/1cc
+                (lambda (k)
+                  (when-match v0 p (call-with-values (lambda () e e* ...) k)) ...
+                  #,(cond [(syntax->annotation code) =>
+                            (lambda (ann)
+                              (let-values ([(file line column) (locate-source-object-source (annotation-source ann) #t #f)])
+                                #`(assertion-violationf 'match "unmatched value ~s in ~s on line ~s, character ~s" v0 #,file #,line #,column)))]
+                          [else #'(assertion-violationf 'match "unmatched value ~s" v0)]))))])))
 
-    (define-syntax match-lambda
-      (syntax-rules ()
-        [(_ clause clause* ...) (lambda (arg) (match arg clause clause* ...))])))
-
+  ; https://github.com/purescript/purescript/blob/master/src/Language/PureScript/CoreFn/Binders.hs#L11-L34
   (define (json-corefn-binder->scheme-corefn corefn)
-    (let ([binder-type (assert (symbol-hashtable-ref corefn 'binderType #f))])
-      (case (string (string-ref binder-type 0) (string-ref binder-type 1))
-        ["Va" `(variable ,(assert (symbol-hashtable-ref corefn 'identifier #f)))]
-        ["Nu" '_]
-        ["Li" (let* ([literal (assert (symbol-hashtable-ref corefn 'literal #f))] [value (assert (symbol-hashtable-ref literal 'value #f))])
-                (case (string-ref (assert (symbol-hashtable-ref literal 'literalType #f)) 0)
-                  [#\A `(array ,@(vector->list (vector-map json-corefn-binder->scheme-corefn value)))]
-                  [#\O `(object ,@(vector->list (vector-map (lambda (corefn) (list (vector-ref corefn 0) (json-corefn-binder->scheme-corefn (vector-ref corefn 1)))) value)))]
-                  [#\C (string-ref value 0)]
-                  [#\N (if (fixnum? value) (fixnum->flonum value) value)]
-                  [else value]))]
-        ["Co" (let ([corefn (assert (symbol-hashtable-ref corefn 'constructorName #f))]
-                    [binders (assert (symbol-hashtable-ref corefn 'binders #f))])
-                `(data
-                  ,(vector->list (assert (symbol-hashtable-ref corefn 'moduleName #f)))
-                  ,(assert (symbol-hashtable-ref corefn 'identifier #f))
-                  ,@(vector->list (vector-map json-corefn-binder->scheme-corefn binders))))]
-        ["Na" `(named
-                ,(assert (symbol-hashtable-ref corefn 'identifier #f))
-                ,(json-corefn-binder->scheme-corefn (assert (symbol-hashtable-ref corefn 'binder #f))))])))
+    (match corefn
+      [(hashtable [binderType "VarBinder"] identifier)
+        `(variable ,identifier)]
+
+      [(hashtable [binderType "NullBinder"])
+        '_]
+
+      ; https://github.com/purescript/purescript/blob/master/src/Language/PureScript/AST/Literals.hs#L12-L41
+      [(hashtable [binderType "LiteralBinder"] [literal (hashtable value literalType)])
+        (case literalType
+          ["ArrayLiteral" `(array ,@(vector->list (vector-map json-corefn-binder->scheme-corefn value)))]
+          ["ObjectLiteral" `(object ,@(vector->list (vector-map (lambda (corefn) (list (vector-ref corefn 0) (json-corefn-binder->scheme-corefn (vector-ref corefn 1)))) value)))]
+          ["CharLiteral" (string-ref value 0)]
+          ["NumericLiteral" (if (fixnum? value) (fixnum->flonum value) value)]
+          [else value])]
+
+      [(hashtable [binderType "ConstructorBinder"] binders [constructorName (hashtable moduleName identifier)])
+        `(data ,(vector->list moduleName) ,identifier ,@(vector->list (vector-map json-corefn-binder->scheme-corefn binders)))]
+
+      [(hashtable [binderType "NamedBinder"] identifier binder)
+        `(named ,identifier ,(json-corefn-binder->scheme-corefn binder))]))
 
   (define (json-corefn-expression->scheme-corefn corefn)
     (let ([type (assert (symbol-hashtable-ref corefn 'type #f))])
@@ -474,12 +493,6 @@
                               (assert (symbol-hashtable-ref (car binds) 'binds #f))))
                           ,(loop (cdr binds))))))])))
 
-  (define (hashtable-map-values f hashtable)
-    (let ([result (hashtable-copy hashtable #t)])
-      (let-values ([(ks vs) (hashtable-entries hashtable)])
-        (vector-for-each (lambda (k v) (symbol-hashtable-set! result k (f v))) ks vs)
-        result)))
-
   (define (json-corefn->scheme-corefn corefn)
     (let ([re-exports (hashtable-map-values vector->list (assert (symbol-hashtable-ref corefn 'reExports #f)))]
           [module-path (assert (symbol-hashtable-ref corefn 'modulePath #f))]
@@ -558,9 +571,11 @@
           [`(case ,e* ,@clause*)
               `(case ,(map loop e*)
                   ,@(map
-                      (match-lambda [`(,ps #f ,e) `(,(map corefn-case-binding->scheme ps) -> ,(loop e))]
-                                    [`(,ps #t ,es) `(,(map corefn-case-binding->scheme ps) ,@(map (lambda (e) `(,(loop (car e)) -> ,(loop (cadr e)))) es))]
-                                    [else (assert #f)])
+                      (lambda (clause)
+                        (match clause
+                          [`(,ps #f ,e) `(,(map corefn-case-binding->scheme ps) -> ,(loop e))]
+                          [`(,ps #t ,es) `(,(map corefn-case-binding->scheme ps) ,@(map (lambda (e) `(,(loop (car e)) -> ,(loop (cadr e)))) es))]
+                          [else (assert #f)]))
                       clause*))]
           [`(object ,@k/v*)
               `(object ,@(map (lambda (k/v) (list (car k/v) (loop (cadr k/v)))) k/v*))]
@@ -585,8 +600,8 @@
     (let ([corefn (json-corefn->scheme-corefn corefn)])
       (let-values ([(module-name module-path imports foreign-imports exports re-exports declarations) (apply values (cdr corefn))])
         (let ([module-prefix (module-name->prefix module-name)])
-          (let*-values ([(data-declarations declarations) (partition (match-lambda [`(,name (data ,@_)) #t] [else #f]) declarations)]
-                        [(newtype-declarations declarations) (partition (match-lambda [`(,name (newtype)) #t] [else #f]) declarations)])
+          (let*-values ([(data-declarations declarations) (partition (lambda (item) (match item [`(,name (data ,@_)) #t] [else #f])) declarations)]
+                        [(newtype-declarations declarations) (partition (lambda (item) (match item [`(,name (newtype)) #t] [else #f])) declarations)])
             `(library (,(string->symbol (module-name->dotted module-name)))
                 (export
                   ,@(map (lambda (export) (string->symbol (string-append module-prefix export))) (sort string<? exports))
@@ -666,16 +681,18 @@
         (format textual-output-port "\n\n  ~s" src)
         (parameterize ([pretty-initial-indent 4])
           (for-each
-            (match-lambda [`(define ,x ,e)
-                              (format textual-output-port "\n\n  (define ~s\n    " x)
-                              (let ([s (call-with-string-output-port (lambda (sop) (pretty-print e sop)))])
-                                (put-string textual-output-port s 0 (sub1 (string-length s))))
-                              (put-char textual-output-port #\))]
-                          [`(define-data-constructor ,x ,arg-length)
-                            (format textual-output-port "\n\n  (define-data-constructor ~s ~s)" x arg-length)]
-                          [`(define-newtype-constructor ,x)
-                            (format textual-output-port "\n\n  (define-newtype-constructor ~s)" x)]
-                          [else (assert #f)])
+            (lambda (item)
+              (match item
+                [`(define ,x ,e)
+                    (format textual-output-port "\n\n  (define ~s\n    " x)
+                    (let ([s (call-with-string-output-port (lambda (sop) (pretty-print e sop)))])
+                      (put-string textual-output-port s 0 (sub1 (string-length s))))
+                    (put-char textual-output-port #\))]
+                [`(define-data-constructor ,x ,arg-length)
+                  (format textual-output-port "\n\n  (define-data-constructor ~s ~s)" x arg-length)]
+                [`(define-newtype-constructor ,x)
+                  (format textual-output-port "\n\n  (define-newtype-constructor ~s)" x)]
+                [else (assert #f)]))
             definitions))
         (put-char textual-output-port #\))
         (put-char textual-output-port #\newline))
