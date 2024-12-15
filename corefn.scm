@@ -422,7 +422,9 @@
            array-binder
            make-array-binder
            object-binder
-           make-object-binder)
+           make-object-binder
+           atomic-binder
+           make-atomic-binder)
 
     (define-record-type corefn)
 
@@ -484,6 +486,18 @@
                       binders)
                     ((new) binders)))])
 
+    (define-record-type atomic-binder
+      [parent corefn]
+      [fields atom]
+      [protocol (lambda (new)
+                  (lambda (atom)
+                    (assert (or (char? atom)
+                                (boolean? atom)
+                                (string? atom)
+                                (and (integer? atom) (exact? atom))
+                                (and (number? atom) (inexact? atom))))
+                    ((new) atom)))])
+
     (record-writer
       (record-type-descriptor corefn)
       (lambda (r p wr)
@@ -517,9 +531,14 @@
           ["ObjectLiteral"
             (make-object-binder (vector-map (lambda (kv) (cons (vector-ref kv 0) (json-corefn-binder->scheme-corefn (vector-ref kv 1)))) value))]
 
-          ["CharLiteral" (string-ref value 0)]
-          ["NumericLiteral" (if (fixnum? value) (fixnum->flonum value) value)]
-          [else value])]
+          ["CharLiteral"
+            (make-atomic-binder (string-ref value 0))]
+
+          ["NumericLiteral"
+            (make-atomic-binder (exact->inexact value))]
+
+          [else
+            (make-atomic-binder value)])]
 
       [(hashtable [binderType "ConstructorBinder"] binders [constructorName (hashtable moduleName identifier)] [annotation (hashtable meta)])
         ; https://github.com/purescript/purescript/blob/master/src/Language/PureScript/CoreFn/Ann.hs#L9-L12
@@ -678,7 +697,8 @@
       [(record newtype-binder binder)
         (corefn-case-binding->scheme binder)]
 
-      [else (assert (atom? corefn)) corefn]))
+      [(record atomic-binder atom)
+        atom]))
 
   (define (function-declaration->scheme module-prefix corefn)
     `(define
