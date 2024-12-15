@@ -416,7 +416,9 @@
            named-binder
            make-named-binder
            newtype-binder
-           make-newtype-binder)
+           make-newtype-binder
+           data-binder
+           make-data-binder)
 
     (define-record-type corefn)
 
@@ -445,6 +447,17 @@
       [protocol (lambda (new)
                   (lambda (binder)
                     ((new) binder)))])
+
+    (define-record-type data-binder
+      [parent corefn]
+      [fields module-name identifier binders]
+      [protocol (lambda (new)
+                  (lambda (module-name identifier binders)
+                    (assert (vector? module-name))
+                    (vector-for-each (lambda (s) (assert (symbol? s))) module-name)
+                    (assert (symbol? identifier))
+                    (assert (vector? binders))
+                    ((new) module-name identifier binders)))])
 
     (record-writer
       (record-type-descriptor corefn)
@@ -488,7 +501,7 @@
             (make-newtype-binder (json-corefn-binder->scheme-corefn (vector-ref binders 0)))]
 
           [(hashtable [metaType "IsConstructor"])
-            `(data ,(vector->list moduleName) ,identifier ,@(vector->list (vector-map json-corefn-binder->scheme-corefn binders)))])]
+            (make-data-binder (vector-map string->symbol moduleName) (string->symbol identifier) (vector-map json-corefn-binder->scheme-corefn binders))])]
 
       [(hashtable [binderType "NamedBinder"] identifier binder)
         (make-named-binder (string->symbol identifier) (json-corefn-binder->scheme-corefn binder))]))
@@ -629,9 +642,8 @@
       [(record named-binder identifier binder)
         (list identifier (corefn-case-binding->scheme binder))]
 
-      [`(data ,(module-prefix (module-name->prefix module-prefix) module-prefix) ,name ,@args)
-          `(data ,(string->symbol (string-append module-prefix name))
-            ,@(map corefn-case-binding->scheme args))]
+      [(record data-binder module-name identifier binders)
+        `(data ,(vector->list module-name) ,identifier ,@(vector->list (vector-map corefn-case-binding->scheme binders)))]
 
       [(record newtype-binder binder)
         (corefn-case-binding->scheme binder)]
