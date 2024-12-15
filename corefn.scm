@@ -340,8 +340,9 @@
               (assertion-violationf 'read-json "Unexpected end")
               (assertion-violationf 'read-json "Unknown token ~s" (stream-car state)))))))
 
-  (module (match hashtable)
+  (module (match hashtable record)
     (define-syntax (hashtable code) (syntax-error code "misplaced aux keyword"))
+    (define-syntax (record code) (syntax-error code "misplaced aux keyword"))
 
     (define-syntax (when-match code)
       (syntax-case code (quasiquote unquote unquote-splicing)
@@ -354,13 +355,31 @@
         [(_ v p e e* ...) (identifier? #'p)
           #'(let ([p v]) e e* ...)]
 
+        [(_ v (re record-type clause* ...) e e* ...) (and (identifier? #'re) (free-identifier=? #'re #'record))
+          #`(let ([rtd (record-type-descriptor record-type)])
+              (when ((record-predicate rtd) v)
+                (let ([xs (record-type-field-names rtd)])
+                  #,(let loop ([clauses #'(clause* ...)])
+                      (syntax-case clauses ()
+                        [() #'(begin e e* ...)]
+                        [([k p] _ ...)
+                          #`(let ([idx (do ([i 0 (add1 i)]) ((or (>= i (vector-length xs)) (symbol=? 'k (vector-ref xs i))) (and (< i (vector-length xs)) i)))])
+                              (if idx
+                                  (when-match ((record-accessor rtd idx) v) p #,(loop (cdr clauses)))
+                                  #,(cond [(syntax->annotation #'k) =>
+                                            (lambda (ann)
+                                              (let-values ([(file line column) (locate-source-object-source (annotation-source ann) #t #f)])
+                                                #`(assertion-violationf 'match "unknown field ~s for record type ~s in ~s on line ~s, character ~s" 'k (record-type-name rtd) #,file #,line #,column)))]
+                                          [else #'(assertion-violationf 'match "unknown field ~s for record type ~s" 'k (record-type-name rtd))])))]
+                        [(k ks/vs ...) (loop #'([k k] ks/vs ...))])))))]
+
         [(_ v (ht clause* ...) e e* ...) (and (identifier? #'ht) (free-identifier=? #'ht #'hashtable))
           #`(when (symbol-hashtable? v)
               #,(let loop ([clauses #'(clause* ...)])
                   (syntax-case clauses ()
                     [() #'(begin e e* ...)]
                     [([k p] _ ...) #`(cond [(symbol-hashtable-ref-cell v 'k) => (lambda (k/v) (when-match (cdr k/v) p #,(loop (cdr clauses))))])]
-                    [(k _ ...) #`(cond [(symbol-hashtable-ref-cell v 'k) => (lambda (k/v) (when-match (cdr k/v) k #,(loop (cdr clauses))))])])))]
+                    [(k ks/vs ...) (loop #'([k k] ks/vs ...))])))]
 
         [(_ v0 (p f y) e e* ...)
           #'(let ([p v0]) (when-match f y e e* ...))]
@@ -390,11 +409,37 @@
                                 #`(assertion-violationf 'match "unmatched value ~s in ~s on line ~s, character ~s" v0 #,file #,line #,column)))]
                           [else #'(assertion-violationf 'match "unmatched value ~s" v0)]))))])))
 
+  (module (variable-binder make-variable-binder)
+    (define-record-type corefn)
+
+    (define-record-type variable-binder
+      [parent corefn]
+      [fields identifier]
+      [protocol (lambda (new)
+                  (lambda (identifier)
+                    (assert (symbol? identifier))
+                    ((new) identifier)))])
+
+    (record-writer
+      (record-type-descriptor corefn)
+      (lambda (r p wr)
+        (display "#<" p)
+        (display (record-type-name (record-rtd r)) p)
+        (let ([field-names (record-type-field-names (record-rtd r))])
+          (do ([i 0 (fx+ i 1)])
+              ((fx>= i (vector-length field-names)))
+            (display " [" p)
+            (display (vector-ref field-names i) p)
+            (put-char p #\space)
+            (wr ((record-accessor (record-rtd r) i) r) p)
+            (put-char p #\])))
+        (put-char p #\>))))
+
   ; https://github.com/purescript/purescript/blob/master/src/Language/PureScript/CoreFn/Binders.hs#L11-L34
   (define (json-corefn-binder->scheme-corefn corefn)
     (match corefn
       [(hashtable [binderType "VarBinder"] identifier)
-        `(variable ,identifier)]
+        (make-variable-binder (string->symbol identifier))]
 
       [(hashtable [binderType "NullBinder"])
         '_]
@@ -536,8 +581,9 @@
 
   (define (corefn-case-binding->scheme corefn)
     (match corefn
-      [`(variable ,(x (string->symbol x) x))
-          x]
+      [(record variable-binder identifier)
+        identifier]
+
       [`(object ,@k/v*)
           `(object ,@(map (lambda (k/v) (list (car k/v) (corefn-case-binding->scheme (cadr k/v)))) k/v*))]
       [`(array ,@xs)
@@ -631,8 +677,8 @@
   (define (put-corefn-library corefn-library textual-output-port)
     (let ([case-fmt  (pretty-format 'case)]
           [array-fmt (pretty-format 'array)])
-      (pretty-format '%app   '(_ var e 5 e 5 e))
-      (pretty-format '%ref   '(_ var e e))
+      (pretty-format '%app   '(_ var (alt (bracket e ...) e) 5 e 5 e))
+      (pretty-format '%ref   '(_ var (alt (bracket e ...) e) e))
       (pretty-format '->     '(_ var body))
       (pretty-format 'object '(_ [bracket x e] 7 ...))
       (pretty-format 'update '(_ _ [bracket x e] 7 ...))
