@@ -5,6 +5,20 @@
 
   (import (chezscheme))
 
+  (module (dbg)
+    (define-syntax (dbg code)
+      (syntax-case code ()
+        [(_ e)
+          (let ([ann (syntax->annotation #'e)])
+            (if ann
+                (let-values ([(file line column) (locate-source-object-source (annotation-source ann) #t #f)])
+                  #`(let ([x e])
+                      (format #t "\x001B;[33mdbg in ~s on line ~s, character ~s\x001B;[0m: ~s\n" #,file #,line #,column x)
+                      x))
+                #`(let ([x e])
+                    (format #t "\x001B;[33mdbg: ~s\x001B;[0m\n" x)
+                    x)))])))
+
   (module (read-json)
     (module (<- monad)
       (define-syntax (<- code) (syntax-error code "misplaced aux keyword"))
