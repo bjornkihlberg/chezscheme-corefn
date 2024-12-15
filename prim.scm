@@ -19,14 +19,9 @@
     (syntax-rules ()
       [(_ arg body) (lambda (arg) body)]))
 
-  (define is-newtype)
-
   (define-syntax define-newtype-constructor
     (syntax-rules ()
-      [(_ name)
-        (begin
-          (define (name x) x)
-          (define-property name is-newtype #t))]))
+      [(_ name) (define (name x) x)]))
 
   (define-syntax (define-data-constructor code)
     (syntax-case code ()
@@ -57,12 +52,10 @@
           [(_ (v vs ...) [(p ps ...) clause* ...]) (identifier? #'p)
             #'(let ([p v]) (corefn-case-clause (vs ...) [(ps ...) clause* ...]))]
           [(_ (v vs ...) [((d name xs ...) ps ...) clause* ...]) (and (identifier? #'d) (free-identifier=? #'d #'data))
-            (if (lookup #'name #'is-newtype)
-                #'(corefn-case-clause (v vs ...) ((xs ... ps ...) clause* ...))
-                #`(when (symbol=? (vector-ref v 0) 'name)
-                    (corefn-case-clause
-                      (#,@(map (lambda (i) #`(vector-ref v #,(add1 i))) (iota (length #'(xs ...)))) vs ...)
-                      ((xs ... ps ...) clause* ...))))]
+            #`(when (symbol=? (vector-ref v 0) 'name)
+                (corefn-case-clause
+                  (#,@(map (lambda (i) #`(vector-ref v #,(add1 i))) (iota (length #'(xs ...)))) vs ...)
+                  ((xs ... ps ...) clause* ...)))]
           [(_ (v vs ...) [((a xs ...) ps ...) clause* ...]) (and (identifier? #'a) (free-identifier=? #'a #'array))
             (let ([n (length #'(xs ...))])
               #`(when (= (vector-length v) #,n)

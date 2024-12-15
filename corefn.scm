@@ -409,7 +409,15 @@
                                 #`(assertion-violationf 'match "unmatched value ~s in ~s on line ~s, character ~s" v0 #,file #,line #,column)))]
                           [else #'(assertion-violationf 'match "unmatched value ~s" v0)]))))])))
 
-  (module (variable-binder make-variable-binder)
+  (module (variable-binder
+           make-variable-binder
+           null-binder
+           make-null-binder
+           named-binder
+           make-named-binder
+           newtype-binder
+           make-newtype-binder)
+
     (define-record-type corefn)
 
     (define-record-type variable-binder
@@ -419,6 +427,24 @@
                   (lambda (identifier)
                     (assert (symbol? identifier))
                     ((new) identifier)))])
+
+    (define-record-type null-binder
+      [parent corefn])
+
+    (define-record-type named-binder
+      [parent corefn]
+      [fields identifier binder]
+      [protocol (lambda (new)
+                  (lambda (identifier binder)
+                    (assert (symbol? identifier))
+                    ((new) identifier binder)))])
+
+    (define-record-type newtype-binder
+      [parent corefn]
+      [fields binder]
+      [protocol (lambda (new)
+                  (lambda (binder)
+                    ((new) binder)))])
 
     (record-writer
       (record-type-descriptor corefn)
@@ -442,7 +468,7 @@
         (make-variable-binder (string->symbol identifier))]
 
       [(hashtable [binderType "NullBinder"])
-        '_]
+        (make-null-binder)]
 
       ; https://github.com/purescript/purescript/blob/master/src/Language/PureScript/AST/Literals.hs#L12-L41
       [(hashtable [binderType "LiteralBinder"] [literal (hashtable value literalType)])
@@ -453,11 +479,19 @@
           ["NumericLiteral" (if (fixnum? value) (fixnum->flonum value) value)]
           [else value])]
 
-      [(hashtable [binderType "ConstructorBinder"] binders [constructorName (hashtable moduleName identifier)])
-        `(data ,(vector->list moduleName) ,identifier ,@(vector->list (vector-map json-corefn-binder->scheme-corefn binders)))]
+      [(hashtable [binderType "ConstructorBinder"] binders [constructorName (hashtable moduleName identifier)] [annotation (hashtable meta)])
+        ; https://github.com/purescript/purescript/blob/master/src/Language/PureScript/CoreFn/Ann.hs#L9-L12
+        ; https://github.com/purescript/purescript/blob/master/src/Language/PureScript/CoreFn/Meta.hs#L10-L38
+        (match meta
+          [(hashtable [metaType "IsNewtype"])
+            (assert (= (vector-length binders) 1))
+            (make-newtype-binder (json-corefn-binder->scheme-corefn (vector-ref binders 0)))]
+
+          [(hashtable [metaType "IsConstructor"])
+            `(data ,(vector->list moduleName) ,identifier ,@(vector->list (vector-map json-corefn-binder->scheme-corefn binders)))])]
 
       [(hashtable [binderType "NamedBinder"] identifier binder)
-        `(named ,identifier ,(json-corefn-binder->scheme-corefn binder))]))
+        (make-named-binder (string->symbol identifier) (json-corefn-binder->scheme-corefn binder))]))
 
   (define (json-corefn-expression->scheme-corefn corefn)
     (let ([type (assert (symbol-hashtable-ref corefn 'type #f))])
@@ -584,15 +618,24 @@
       [(record variable-binder identifier)
         identifier]
 
+      [(record null-binder)
+        '_]
+
       [`(object ,@k/v*)
           `(object ,@(map (lambda (k/v) (list (car k/v) (corefn-case-binding->scheme (cadr k/v)))) k/v*))]
       [`(array ,@xs)
           `(array ,@(map corefn-case-binding->scheme xs))]
-      [`(named ,(x (string->symbol x) x) ,p)
-          `(,x ,(corefn-case-binding->scheme p))]
+
+      [(record named-binder identifier binder)
+        (list identifier (corefn-case-binding->scheme binder))]
+
       [`(data ,(module-prefix (module-name->prefix module-prefix) module-prefix) ,name ,@args)
           `(data ,(string->symbol (string-append module-prefix name))
             ,@(map corefn-case-binding->scheme args))]
+
+      [(record newtype-binder binder)
+        (corefn-case-binding->scheme binder)]
+
       [else (assert (atom? corefn)) corefn]))
 
   (define (function-declaration->scheme module-prefix corefn)
