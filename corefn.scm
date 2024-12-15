@@ -428,6 +428,18 @@
 
     (define-record-type corefn)
 
+    (define (binder? e)
+      (and
+        (corefn? e)
+        (or (variable-binder? e)
+            (null-binder? e)
+            (named-binder? e)
+            (newtype-binder? e)
+            (data-binder? e)
+            (array-binder? e)
+            (object-binder? e)
+            (atomic-binder? e))))
+
     (define-record-type variable-binder
       [parent corefn]
       [fields identifier]
@@ -445,6 +457,7 @@
       [protocol (lambda (new)
                   (lambda (identifier binder)
                     (assert (symbol? identifier))
+                    (assert (binder? binder))
                     ((new) identifier binder)))])
 
     (define-record-type newtype-binder
@@ -452,6 +465,7 @@
       [fields binder]
       [protocol (lambda (new)
                   (lambda (binder)
+                    (assert (binder? binder))
                     ((new) binder)))])
 
     (define-record-type data-binder
@@ -463,6 +477,7 @@
                     (vector-for-each (lambda (s) (assert (symbol? s))) module-name)
                     (assert (symbol? identifier))
                     (assert (vector? binders))
+                    (vector-for-each (lambda (binder) (assert (binder? binder))) binders)
                     ((new) module-name identifier binders)))])
 
     (define-record-type array-binder
@@ -471,6 +486,7 @@
       [protocol (lambda (new)
                   (lambda (binders)
                     (assert (vector? binders))
+                    (vector-for-each (lambda (binder) (assert (binder? binder))) binders)
                     ((new) binders)))])
 
     (define-record-type object-binder
@@ -482,7 +498,8 @@
                     (vector-for-each
                       (lambda (binder)
                         (assert (pair? binder))
-                        (assert (string? (car binder))))
+                        (assert (string? (car binder)))
+                        (assert (binder? (cdr binder))))
                       binders)
                     ((new) binders)))])
 
