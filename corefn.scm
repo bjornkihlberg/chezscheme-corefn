@@ -523,6 +523,7 @@
         (make-null-binder)]
 
       ; https://github.com/purescript/purescript/blob/master/src/Language/PureScript/AST/Literals.hs#L12-L41
+      ; https://github.com/purescript/purescript/blob/fc3fa8897916de1a3973de976eaea1fba23b4df9/src/Language/PureScript/CoreFn/ToJSON.hs#L61-L96
       [(hashtable [binderType "LiteralBinder"] [literal (hashtable value literalType)])
         (case literalType
           ["ArrayLiteral"
@@ -534,7 +535,7 @@
           ["CharLiteral"
             (make-atomic-binder (string-ref value 0))]
 
-          ["NumericLiteral"
+          ["NumberLiteral"
             (make-atomic-binder (exact->inexact value))]
 
           [else
@@ -556,99 +557,104 @@
 
   ; https://github.com/purescript/purescript/blob/master/src/Language/PureScript/CoreFn/Expr.hs#L15-L55
   (define (json-corefn-expression->scheme-corefn corefn)
-    (case (assert (symbol-hashtable-ref corefn 'type #f))
-      ["Var"
-        (let ([value (assert (symbol-hashtable-ref corefn 'value #f))]
-              [sourceSpan (assert (symbol-hashtable-ref (assert (symbol-hashtable-ref corefn 'annotation #f)) 'sourceSpan #f))])
-          (let ([moduleName (symbol-hashtable-ref value 'moduleName #f)]
-                [sourcePos (symbol-hashtable-ref value 'sourcePos #f)]
-                [sourceStart (assert (symbol-hashtable-ref sourceSpan 'start #f))]
-                [sourceEnd (assert (symbol-hashtable-ref sourceSpan 'end #f))])
-            `(variable
-              ,(if (and (not (equal? sourceStart '#(0 0))) (not (equal? sourceEnd '#(0 0))) (or moduleName (and sourcePos (not (equal? sourcePos '#(0 0))))))
-                `(,@(vector->list sourceStart) ,@(vector->list sourceEnd))
-                #f)
-              ,(if moduleName (vector->list moduleName) '())
-              ,(assert (symbol-hashtable-ref value 'identifier #f)))))]
+    (match corefn
+      [(hashtable [type "Var"] value [annotation (hashtable [sourceSpan (hashtable start end)])])
+        (let ([moduleName (symbol-hashtable-ref value 'moduleName #f)]
+              [sourcePos (symbol-hashtable-ref value 'sourcePos #f)])
+          `(variable
+            ,(if (and (not (equal? start '#(0 0))) (not (equal? end '#(0 0))) (or moduleName (and sourcePos (not (equal? sourcePos '#(0 0))))))
+              `(,@(vector->list start) ,@(vector->list end))
+              #f)
+            ,(if moduleName (vector->list moduleName) '())
+            ,(assert (symbol-hashtable-ref value 'identifier #f))))]
 
-      ["Literal"
-        (let ([value (assert (symbol-hashtable-ref corefn 'value #f))])
-          (let ([literalType (assert (symbol-hashtable-ref value 'literalType #f))]
-                [value (assert (symbol-hashtable-ref value 'value #f))])
-            (case (string-ref literalType 0)
-              [#\C (string-ref value 0)]
-              [#\A `(array ,@(vector->list (vector-map json-corefn-expression->scheme-corefn value)))]
-              [#\O `(object ,@(vector->list (vector-map (lambda (corefn) (list (vector-ref corefn 0) (json-corefn-expression->scheme-corefn (vector-ref corefn 1)))) value)))]
-              [#\N (if (fixnum? value) (fixnum->flonum value) value)]
-              [else value])))]
+      ; https://github.com/purescript/purescript/blob/master/src/Language/PureScript/AST/Literals.hs#L12-L41
+      ; https://github.com/purescript/purescript/blob/fc3fa8897916de1a3973de976eaea1fba23b4df9/src/Language/PureScript/CoreFn/ToJSON.hs#L61-L96
+      [(hashtable [type "Literal"] [value (hashtable literalType value)])
+        (case literalType
+          ["CharLiteral"
+            (string-ref value 0)]
 
-      ["Constructor"
-        `(data
-          ,(assert (symbol-hashtable-ref corefn 'constructorName #f))
-          ,@(vector->list (assert (symbol-hashtable-ref corefn 'fieldNames #f))))]
+          ["ArrayLiteral"
+            `(array ,@(vector->list (vector-map json-corefn-expression->scheme-corefn value)))]
 
-      ["Accessor"
-        `(access
-          ,(json-corefn-expression->scheme-corefn (assert (symbol-hashtable-ref corefn 'expression #f)))
-          ,(assert (symbol-hashtable-ref corefn 'fieldName #f)))]
+          ["ObjectLiteral"
+            `(object ,@(vector->list (vector-map (lambda (corefn) (list (vector-ref corefn 0) (json-corefn-expression->scheme-corefn (vector-ref corefn 1)))) value)))]
 
-      ["ObjectUpdate"
+          ["NumberLiteral"
+            (exact->inexact value)]
+
+          [else
+            value])]
+
+      [(hashtable [type "Constructor"] constructorName fieldNames)
+        `(data ,constructorName ,@(vector->list fieldNames))]
+
+      [(hashtable [type "Accessor"] expression fieldName)
+        `(access ,(json-corefn-expression->scheme-corefn expression) ,fieldName)]
+
+      [(hashtable [type "ObjectUpdate"] expression updates)
         `(update
-          ,(json-corefn-expression->scheme-corefn (assert (symbol-hashtable-ref corefn 'expression #f)))
-          ,(vector->list (vector-map (lambda (corefn) (list (vector-ref corefn 0) (json-corefn-expression->scheme-corefn (vector-ref corefn 1)))) (assert (symbol-hashtable-ref corefn 'updates #f)))))]
+          ,(json-corefn-expression->scheme-corefn expression)
+          ,(vector->list (vector-map (lambda (kv) (list (vector-ref kv 0) (json-corefn-expression->scheme-corefn (vector-ref kv 1)))) updates)))]
 
-      ["Abs"
-        `(abstraction
-          ,(assert (symbol-hashtable-ref corefn 'argument #f))
-          ,(json-corefn-expression->scheme-corefn (assert (symbol-hashtable-ref corefn 'body #f))))]
+      [(hashtable [type "Abs"] argument body)
+        `(abstraction ,argument ,(json-corefn-expression->scheme-corefn body))]
 
-      ["App"
-        (let ([sourceSpan (assert (symbol-hashtable-ref (assert (symbol-hashtable-ref corefn 'annotation #f)) 'sourceSpan #f))])
-          (let ([sourceStart (assert (symbol-hashtable-ref sourceSpan 'start #f))]
-                [sourceEnd (assert (symbol-hashtable-ref sourceSpan 'end #f))])
-            `(application
-              ,(if (and (not (equal? sourceStart '#(0 0))) (not (equal? sourceEnd '#(0 0))))
-                `(,@(vector->list sourceStart) ,@(vector->list sourceEnd))
-                #f)
-              ,(json-corefn-expression->scheme-corefn (assert (symbol-hashtable-ref corefn 'abstraction #f)))
-              ,(json-corefn-expression->scheme-corefn (assert (symbol-hashtable-ref corefn 'argument #f))))))]
+      [(hashtable [type "App"] [annotation (hashtable [sourceSpan (hashtable start end)])] abstraction argument)
+        `(application
+          ,(if (and (not (equal? start '#(0 0))) (not (equal? end '#(0 0))))
+            `(,@(vector->list start) ,@(vector->list end))
+            #f)
+          ,(json-corefn-expression->scheme-corefn abstraction)
+          ,(json-corefn-expression->scheme-corefn argument))]
 
-      ["Case"
+      [(hashtable [type "Case"] caseExpressions caseAlternatives)
         `(case
-          ,(vector->list (vector-map json-corefn-expression->scheme-corefn (assert (symbol-hashtable-ref corefn 'caseExpressions #f))))
+          ,(vector->list (vector-map json-corefn-expression->scheme-corefn caseExpressions))
           ,@(vector->list
               (vector-map
-                (lambda (corefn)
-                  (let ([binders (vector->list (vector-map json-corefn-binder->scheme-corefn (assert (symbol-hashtable-ref corefn 'binders #f))))])
-                    (if (cdr (assert (symbol-hashtable-ref-cell corefn 'isGuarded)))
+                (lambda (caseAlternative)
+                  ; https://github.com/purescript/purescript/blob/master/src/Language/PureScript/CoreFn/Expr.hs#L75-L87
+                  ; https://github.com/purescript/purescript/blob/fc3fa8897916de1a3973de976eaea1fba23b4df9/src/Language/PureScript/CoreFn/ToJSON.hs#L214-L224
+                  (let ([binders (vector->list (vector-map json-corefn-binder->scheme-corefn (assert (symbol-hashtable-ref caseAlternative 'binders #f))))])
+                    (match caseAlternative
+                      ; https://github.com/purescript/purescript/blob/master/src/Language/PureScript/CoreFn/Expr.hs#L70-L73
+                      [(hashtable [isGuarded #t] expressions)
                         (list binders #t
-                          (vector->list
-                            (vector-map
-                              (lambda (corefn)
-                                (list
-                                  (json-corefn-expression->scheme-corefn (assert (symbol-hashtable-ref corefn 'guard #f)))
-                                  (json-corefn-expression->scheme-corefn (assert (symbol-hashtable-ref corefn 'expression #f)))))
-                              (assert (symbol-hashtable-ref corefn 'expressions #f)))))
-                        (list binders #f (json-corefn-expression->scheme-corefn (assert (symbol-hashtable-ref corefn 'expression #f)))))))
-                (assert (symbol-hashtable-ref corefn 'caseAlternatives #f)))))]
+                              (vector->list
+                                (vector-map
+                                  (lambda (corefn)
+                                    (match corefn
+                                      [(hashtable guard expression)
+                                        (list (json-corefn-expression->scheme-corefn guard)
+                                              (json-corefn-expression->scheme-corefn expression))]))
+                                  expressions)))]
 
-      ["Let"
-        (let loop ([binds (vector->list (assert (symbol-hashtable-ref corefn 'binds #f)))])
+                      [(hashtable [isGuarded #f] expression)
+                        (list binders #f (json-corefn-expression->scheme-corefn expression))])))
+                caseAlternatives)))]
+
+      [(hashtable [type "Let"] binds expression)
+        (let loop ([binds (vector->list binds)])
           (if (null? binds)
-              (json-corefn-expression->scheme-corefn (assert (symbol-hashtable-ref corefn 'expression #f)))
-              (if (char=? (string-ref (assert (symbol-hashtable-ref (car binds) 'bindType #f)) 0) #\N)
-                  `(bind
-                    ,(assert (symbol-hashtable-ref (car binds) 'identifier #f))
-                    ,(json-corefn-expression->scheme-corefn (assert (symbol-hashtable-ref (car binds) 'expression #f)))
-                    ,(loop (cdr binds)))
+              (json-corefn-expression->scheme-corefn expression)
+              ; https://github.com/purescript/purescript/blob/master/src/Language/PureScript/CoreFn/Expr.hs#L57-L68
+              ; https://github.com/purescript/purescript/blob/fc3fa8897916de1a3973de976eaea1fba23b4df9/src/Language/PureScript/CoreFn/ToJSON.hs#L142-L159
+              (match (car binds)
+                [(hashtable [bindType "NonRec"] identifier expression)
+                  `(bind ,identifier ,(json-corefn-expression->scheme-corefn expression) ,(loop (cdr binds)))]
+
+                [(hashtable [bindType "Rec"] binds)
                   `(bindrec
                     ,(vector->list
                       (vector-map
                         (lambda (bind)
-                          (list (assert (symbol-hashtable-ref bind 'identifier #f))
-                                (json-corefn-expression->scheme-corefn (assert (symbol-hashtable-ref bind 'expression #f)))))
-                        (assert (symbol-hashtable-ref (car binds) 'binds #f))))
-                    ,(loop (cdr binds))))))]))
+                          (match bind
+                            [(hashtable identifier expression)
+                              (list identifier (json-corefn-expression->scheme-corefn expression))]))
+                        binds))
+                    ,(loop (cdr binds)))])))]))
 
   (define (json-corefn->scheme-corefn corefn)
     (let ([re-exports (hashtable-map-values vector->list (assert (symbol-hashtable-ref corefn 'reExports #f)))]
