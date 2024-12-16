@@ -438,7 +438,9 @@
            access-expression
            make-access-expression
            update-expression
-           make-update-expression)
+           make-update-expression
+           abstraction-expression
+           make-abstraction-expression)
 
     (define-record-type corefn)
 
@@ -456,6 +458,14 @@
                     (assert (fxpositive? end-char))
                     (new start-line start-char end-line end-char)))]
       [opaque #t])
+
+    (define-record-type abstraction-expression
+      [parent corefn]
+      [fields argument body]
+      [protocol (lambda (new)
+                  (lambda (argument body)
+                    (assert (symbol? argument))
+                    ((new) argument body)))])
 
     (define-record-type update-expression
       [parent corefn]
@@ -692,7 +702,7 @@
           (vector-map (lambda (kv) (cons (vector-ref kv 0) (json-corefn-expression->scheme-corefn (vector-ref kv 1)))) updates))]
 
       [(hashtable [type "Abs"] argument body)
-        `(abstraction ,argument ,(json-corefn-expression->scheme-corefn body))]
+        (make-abstraction-expression (string->symbol argument) (json-corefn-expression->scheme-corefn body))]
 
       [(hashtable [type "App"] [annotation (hashtable [sourceSpan (hashtable start end)])] abstraction argument)
         `(application
@@ -833,7 +843,10 @@
 
           [`(application ,source-location ,abstraction ,expression)
               (list '%app 'src source-location (loop abstraction) (loop expression))]
-          [`(abstraction ,(x (string->symbol x) x) ,body) `(-> ,x ,(loop body))]
+
+          [(record abstraction-expression argument body)
+            `(-> ,argument ,(loop body))]
+
           [`(bind ,(x (string->symbol x) x) ,e ,body)
               (let inner-loop ([body body] [acc (list (list x (loop e)))])
                 (match body
