@@ -446,7 +446,9 @@
            array-expression
            make-array-expression
            object-expression
-           make-object-expression)
+           make-object-expression
+           application-expression
+           make-application-expression)
 
     (define-record-type corefn)
 
@@ -464,6 +466,14 @@
                     (assert (fxpositive? end-char))
                     (new start-line start-char end-line end-char)))]
       [opaque #t])
+
+    (define-record-type application-expression
+      [parent corefn]
+      [fields source-location abstraction value]
+      [protocol (lambda (new)
+                  (lambda (source-location abstraction value)
+                    (when source-location (assert (source-location? source-location)))
+                    ((new) source-location abstraction value)))])
 
     (define-record-type object-expression
       [parent corefn]
@@ -744,12 +754,12 @@
         (make-abstraction-expression (string->symbol argument) (json-corefn-expression->scheme-corefn body))]
 
       [(hashtable [type "App"] [annotation (hashtable [sourceSpan (hashtable start end)])] abstraction argument)
-        `(application
-          ,(if (and (not (equal? start '#(0 0))) (not (equal? end '#(0 0))))
-            `(,@(vector->list start) ,@(vector->list end))
-            #f)
-          ,(json-corefn-expression->scheme-corefn abstraction)
-          ,(json-corefn-expression->scheme-corefn argument))]
+        (make-application-expression
+          (and
+            (not (equal? start '#(0 0)))
+            (make-source-location (vector-ref start 0) (vector-ref start 1) (vector-ref end 0) (vector-ref end 1)))
+          (json-corefn-expression->scheme-corefn abstraction)
+          (json-corefn-expression->scheme-corefn argument))]
 
       [(hashtable [type "Case"] caseExpressions caseAlternatives)
         `(case
@@ -880,8 +890,16 @@
                           (source-location-end-char source-location)))
                   (vector->list module-name) identifier)]
 
-          [`(application ,source-location ,abstraction ,expression)
-              (list '%app 'src source-location (loop abstraction) (loop expression))]
+          [(record application-expression source-location abstraction value)
+            (list '%app 'src
+                  (and
+                    source-location
+                    (list (source-location-start-line source-location)
+                          (source-location-start-char source-location)
+                          (source-location-end-line source-location)
+                          (source-location-end-char source-location)))
+                  (loop abstraction)
+                  (loop value))]
 
           [(record abstraction-expression argument body)
             `(-> ,argument ,(loop body))]
