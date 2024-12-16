@@ -8,8 +8,8 @@
           define-data-constructor
           case
           object
-          array
-          data
+          %array
+          %data
           %access
           %update)
 
@@ -63,12 +63,12 @@
             #'(corefn-case-clause (vs ...) [(ps ...) clause* ...])]
           [(_ (v vs ...) [(p ps ...) clause* ...]) (identifier? #'p)
             #'(let ([p v]) (corefn-case-clause (vs ...) [(ps ...) clause* ...]))]
-          [(_ (v vs ...) [((d module-name name xs ...) ps ...) clause* ...]) (and (identifier? #'d) (free-identifier=? #'d #'data))
+          [(_ (v vs ...) [((d module-name name xs ...) ps ...) clause* ...]) (and (identifier? #'d) (free-identifier=? #'d #'%data))
             #`(when (symbol=? (vector-ref v 0) '#,(identifier-path #'module-name #'name))
                 (corefn-case-clause
                   (#,@(map (lambda (i) #`(vector-ref v #,(add1 i))) (iota (length #'(xs ...)))) vs ...)
                   ((xs ... ps ...) clause* ...)))]
-          [(_ (v vs ...) [((a xs ...) ps ...) clause* ...]) (and (identifier? #'a) (free-identifier=? #'a #'array))
+          [(_ (v vs ...) [((a xs ...) ps ...) clause* ...]) (and (identifier? #'a) (free-identifier=? #'a #'%array))
             (let ([n (length #'(xs ...))])
               #`(when (= (vector-length v) #,n)
                   (corefn-case-clause (#,@(map (lambda (i) #`(vector-ref v #,i)) (iota n)) vs ...)
@@ -98,9 +98,9 @@
                               [(ps (t -> e) (t* -> e*) ...) #`(corefn-case-clause (#,@u*) (ps (t -> (#,k e)) (t* -> (#,k e*)) ...))]))
                           #'(clause+ ...)))))))]))
 
-  (define-syntax (data code) (syntax-error code "misplaced aux keyword"))
+  (define-syntax (%data code) (syntax-error code "misplaced aux keyword"))
 
-  (define-syntax array
+  (define-syntax %array
     (syntax-rules ()
       [(_ xs ...) (vector xs ...)]))
 

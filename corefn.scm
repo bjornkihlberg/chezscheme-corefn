@@ -836,13 +836,13 @@
         `(object ,@(vector->list (vector-map (lambda (k/v) (list (car k/v) (corefn-case-binding->scheme (cdr k/v)))) binders)))]
 
       [(record array-binder binders)
-        `(array ,@(vector->list (vector-map corefn-case-binding->scheme binders)))]
+        `(%array ,@(vector->list (vector-map corefn-case-binding->scheme binders)))]
 
       [(record named-binder identifier binder)
         (list identifier (corefn-case-binding->scheme binder))]
 
       [(record data-binder module-name identifier binders)
-        `(data ,(vector->list module-name) ,identifier ,@(vector->list (vector-map corefn-case-binding->scheme binders)))]
+        `(%data ,(vector->list module-name) ,identifier ,@(vector->list (vector-map corefn-case-binding->scheme binders)))]
 
       [(record newtype-binder binder)
         (corefn-case-binding->scheme binder)]
@@ -893,7 +893,7 @@
               `(object ,@(map (lambda (k/v) (list (car k/v) (loop (cadr k/v)))) k/v*))]
 
           [(record array-expression items)
-            `(array ,@(vector->list (vector-map loop items)))]
+            `(%array ,@(vector->list (vector-map loop items)))]
 
           [(record update-expression object updates)
             `(%update ,(loop object) ,@(vector->list (vector-map (lambda (k/v) (list (car k/v) (loop (cdr k/v)))) updates)))]
@@ -932,7 +932,7 @@
                       (import (prefix foreign-module ,(string->symbol module-prefix))))
                     '())
                 (import (only (chezscheme) define let let* letrec define-syntax make-compile-time-value)
-                        (only (prim) %app %ref -> define-newtype-constructor define-data-constructor case object array data %access %update)
+                        (only (prim) %app %ref -> define-newtype-constructor define-data-constructor case object %array %data %access %update)
                         ,@(map (lambda (x) (list (string->symbol x))) (sort string<? (map module-name->dotted imports))))
                 (define-syntax src (make-compile-time-value ,module-path))
                 ,@(map
@@ -946,14 +946,13 @@
                     declarations)))))))
 
   (define (put-corefn-library corefn-library textual-output-port)
-    (let ([case-fmt  (pretty-format 'case)]
-          [array-fmt (pretty-format 'array)])
+    (let ([case-fmt  (pretty-format 'case)])
       (pretty-format '%app   '(_ var (alt (bracket e ...) e) 5 e 5 e))
       (pretty-format '%ref   '(_ var (alt (bracket e ...) e) e e))
       (pretty-format '->     '(_ var body))
       (pretty-format 'object '(_ [bracket x e] 7 ...))
-      (pretty-format 'update '(_ _ [bracket x e] 7 ...))
-      (pretty-format 'array  '(_ e 6 ...))
+      (pretty-format '%update '(_ _ [bracket x e] 7 ...))
+      (pretty-format '%array  '(_ e 6 ...))
       (pretty-format 'case   '(_ (_ ...) 1 (alt [bracket (_ ...) '-> _]
                                                 [bracket (_ ...) 1 [bracket _ '-> _] ...]) ...))
       (let-values ([(name exports core-import foreign-module foreign-import import0 imports src definitions)
@@ -1013,8 +1012,7 @@
             definitions))
         (put-char textual-output-port #\))
         (put-char textual-output-port #\newline))
-      (pretty-format 'case  case-fmt)
-      (pretty-format 'array array-fmt)))
+      (pretty-format 'case  case-fmt)))
 
   (define (transpile-corefn-output-folder path)
     (for-each
