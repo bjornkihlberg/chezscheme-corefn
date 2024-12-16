@@ -448,7 +448,9 @@
            object-expression
            make-object-expression
            application-expression
-           make-application-expression)
+           make-application-expression
+           bind-expression
+           make-bind-expression)
 
     (define-record-type corefn)
 
@@ -466,6 +468,14 @@
                     (assert (fxpositive? end-char))
                     (new start-line start-char end-line end-char)))]
       [opaque #t])
+
+    (define-record-type bind-expression
+      [parent corefn]
+      [fields identifier value body]
+      [protocol (lambda (new)
+                  (lambda (identifier value body)
+                    (assert (symbol? identifier))
+                    ((new) identifier value body)))])
 
     (define-record-type application-expression
       [parent corefn]
@@ -795,7 +805,10 @@
               ; https://github.com/purescript/purescript/blob/fc3fa8897916de1a3973de976eaea1fba23b4df9/src/Language/PureScript/CoreFn/ToJSON.hs#L142-L159
               (match (car binds)
                 [(hashtable [bindType "NonRec"] identifier expression)
-                  `(bind ,identifier ,(json-corefn-expression->scheme-corefn expression) ,(loop (cdr binds)))]
+                  (make-bind-expression
+                    (string->symbol identifier)
+                    (json-corefn-expression->scheme-corefn expression)
+                    (loop (cdr binds)))]
 
                 [(hashtable [bindType "Rec"] binds)
                   `(bindrec
@@ -904,6 +917,15 @@
           [(record abstraction-expression argument body)
             `(-> ,argument ,(loop body))]
 
+          [(record bind-expression identifier value body)
+            (let inner-loop ([body body] [acc (list (list identifier (loop value)))])
+              (match body
+                [(record bind-expression identifier value body)
+                  (inner-loop body (cons (list identifier (loop value)) acc))]
+
+                [else
+                  `(,(if (= (length acc) 1) 'let 'let*) ,(reverse acc) ,(loop body))]))]
+
           [`(bind ,(x (string->symbol x) x) ,e ,body)
               (let inner-loop ([body body] [acc (list (list x (loop e)))])
                 (match body
@@ -984,9 +1006,9 @@
       (pretty-format '%app   '(_ var (alt (bracket e ...) e) 5 e 5 e))
       (pretty-format '%ref   '(_ var (alt (bracket e ...) e) e e))
       (pretty-format '->     '(_ var body))
-      (pretty-format 'object '(_ [bracket x e] 7 ...))
-      (pretty-format '%update '(_ _ [bracket x e] 7 ...))
-      (pretty-format '%array  '(_ e 6 ...))
+      (pretty-format '%object '(_ [bracket x e] 8 ...))
+      (pretty-format '%update '(_ _ [bracket x e] 8 ...))
+      (pretty-format '%array  '(_ e 7 ...))
       (pretty-format 'case   '(_ (_ ...) 1 (alt [bracket (_ ...) '-> _]
                                                 [bracket (_ ...) 1 [bracket _ '-> _] ...]) ...))
       (let-values ([(name exports core-import foreign-module foreign-import import0 imports src definitions)
