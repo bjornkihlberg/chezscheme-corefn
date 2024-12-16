@@ -444,7 +444,9 @@
            atomic-expression
            make-atomic-expression
            array-expression
-           make-array-expression)
+           make-array-expression
+           object-expression
+           make-object-expression)
 
     (define-record-type corefn)
 
@@ -462,6 +464,19 @@
                     (assert (fxpositive? end-char))
                     (new start-line start-char end-line end-char)))]
       [opaque #t])
+
+    (define-record-type object-expression
+      [parent corefn]
+      [fields items]
+      [protocol (lambda (new)
+                  (lambda (items)
+                    (assert (vector? items))
+                    (vector-for-each
+                      (lambda (item)
+                        (assert (pair? item))
+                        (assert (string? (car item))))
+                      items)
+                    ((new) items)))])
 
     (define-record-type array-expression
       [parent corefn]
@@ -706,7 +721,7 @@
             (make-array-expression (vector-map json-corefn-expression->scheme-corefn value))]
 
           ["ObjectLiteral"
-            `(object ,@(vector->list (vector-map (lambda (corefn) (list (vector-ref corefn 0) (json-corefn-expression->scheme-corefn (vector-ref corefn 1)))) value)))]
+            (make-object-expression (vector-map (lambda (corefn) (cons (vector-ref corefn 0) (json-corefn-expression->scheme-corefn (vector-ref corefn 1)))) value))]
 
           ["NumberLiteral"
             (make-atomic-expression (exact->inexact value))]
@@ -833,7 +848,7 @@
         '_]
 
       [(record object-binder binders)
-        `(object ,@(vector->list (vector-map (lambda (k/v) (list (car k/v) (corefn-case-binding->scheme (cdr k/v)))) binders)))]
+        `(%object ,@(vector->list (vector-map (lambda (k/v) (list (car k/v) (corefn-case-binding->scheme (cdr k/v)))) binders)))]
 
       [(record array-binder binders)
         `(%array ,@(vector->list (vector-map corefn-case-binding->scheme binders)))]
@@ -889,8 +904,9 @@
                           [`(,ps #t ,es) `(,(map corefn-case-binding->scheme ps) ,@(map (lambda (e) `(,(loop (car e)) -> ,(loop (cadr e)))) es))]
                           [else (assert #f)]))
                       clause*))]
-          [`(object ,@k/v*)
-              `(object ,@(map (lambda (k/v) (list (car k/v) (loop (cadr k/v)))) k/v*))]
+
+          [(record object-expression items)
+            `(%object ,@(vector->list (vector-map (lambda (k/v) (list (car k/v) (loop (cdr k/v)))) items)))]
 
           [(record array-expression items)
             `(%array ,@(vector->list (vector-map loop items)))]
@@ -932,7 +948,7 @@
                       (import (prefix foreign-module ,(string->symbol module-prefix))))
                     '())
                 (import (only (chezscheme) define let let* letrec define-syntax make-compile-time-value)
-                        (only (prim) %app %ref -> define-newtype-constructor define-data-constructor case object %array %data %access %update)
+                        (only (prim) %app %ref -> define-newtype-constructor define-data-constructor case %object %array %data %access %update)
                         ,@(map (lambda (x) (list (string->symbol x))) (sort string<? (map module-name->dotted imports))))
                 (define-syntax src (make-compile-time-value ,module-path))
                 ,@(map

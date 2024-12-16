@@ -7,7 +7,7 @@
           define-newtype-constructor
           define-data-constructor
           case
-          object
+          %object
           %array
           %data
           %access
@@ -73,9 +73,9 @@
               #`(when (= (vector-length v) #,n)
                   (corefn-case-clause (#,@(map (lambda (i) #`(vector-ref v #,i)) (iota n)) vs ...)
                     [(xs ... ps ...) clause* ...])))]
-          [(_ (v vs ...) [((o) ps ...) clause* ...]) (and (identifier? #'o) (free-identifier=? #'o #'object))
+          [(_ (v vs ...) [((o) ps ...) clause* ...]) (and (identifier? #'o) (free-identifier=? #'o #'%object))
             #'(corefn-case-clause (vs ...) [(ps ...) clause* ...])]
-          [(m (v vs ...) [((o [k x] k/x ...) ps ...) clause* ...]) (and (identifier? #'o) (free-identifier=? #'o #'object))
+          [(m (v vs ...) [((o [k x] k/x ...) ps ...) clause* ...]) (and (identifier? #'o) (free-identifier=? #'o #'%object))
             #`(let ([v0 (%access v k)])
                 (corefn-case-clause (v0 v vs ...) [(x (o k/x ...) ps ...) clause* ...]))]
           [(_ (v vs ...) [((n p) ps ...) clause* ...]) (identifier? #'n)
@@ -104,7 +104,7 @@
     (syntax-rules ()
       [(_ xs ...) (vector xs ...)]))
 
-  (define-syntax (object code)
+  (define-syntax (%object code)
     (syntax-case code ()
       [(m [k v] ...)
         (let ([k/v* (map
