@@ -442,7 +442,9 @@
            abstraction-expression
            make-abstraction-expression
            atomic-expression
-           make-atomic-expression)
+           make-atomic-expression
+           array-expression
+           make-array-expression)
 
     (define-record-type corefn)
 
@@ -460,6 +462,14 @@
                     (assert (fxpositive? end-char))
                     (new start-line start-char end-line end-char)))]
       [opaque #t])
+
+    (define-record-type array-expression
+      [parent corefn]
+      [fields items]
+      [protocol (lambda (new)
+                  (lambda (items)
+                    (assert (vector? items))
+                    ((new) items)))])
 
     (define-record-type atomic-expression
       [parent corefn]
@@ -693,7 +703,7 @@
             (make-atomic-expression (string-ref value 0))]
 
           ["ArrayLiteral"
-            `(array ,@(vector->list (vector-map json-corefn-expression->scheme-corefn value)))]
+            (make-array-expression (vector-map json-corefn-expression->scheme-corefn value))]
 
           ["ObjectLiteral"
             `(object ,@(vector->list (vector-map (lambda (corefn) (list (vector-ref corefn 0) (json-corefn-expression->scheme-corefn (vector-ref corefn 1)))) value)))]
@@ -881,8 +891,9 @@
                       clause*))]
           [`(object ,@k/v*)
               `(object ,@(map (lambda (k/v) (list (car k/v) (loop (cadr k/v)))) k/v*))]
-          [`(array ,@xs)
-              `(array ,@(map loop xs))]
+
+          [(record array-expression items)
+            `(array ,@(vector->list (vector-map loop items)))]
 
           [(record update-expression object updates)
             `(%update ,(loop object) ,@(vector->list (vector-map (lambda (k/v) (list (car k/v) (loop (cdr k/v)))) updates)))]
