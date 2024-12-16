@@ -432,7 +432,9 @@
            source-location-end-line
            source-location-end-char
            variable-expression
-           make-variable-expression)
+           make-variable-expression
+           data-expression
+           make-data-expression)
 
     (define-record-type corefn)
 
@@ -450,6 +452,16 @@
                     (assert (fxpositive? end-char))
                     (new start-line start-char end-line end-char)))]
       [opaque #t])
+
+    (define-record-type data-expression
+      [parent corefn]
+      [fields constructor-name field-count]
+      [protocol (lambda (new)
+                  (lambda (constructor-name field-count)
+                    (assert (symbol? constructor-name))
+                    (assert (fixnum? field-count))
+                    (assert (fxnonnegative? field-count))
+                    ((new) constructor-name field-count)))])
 
     (define-record-type variable-expression
       [parent corefn]
@@ -620,7 +632,6 @@
             (if moduleName (vector-map string->symbol moduleName) '#())
             (and
               (not (equal? start '#(0 0)))
-              (not (equal? end '#(0 0)))
               (or moduleName (and sourcePos (not (equal? sourcePos '#(0 0)))))
               (make-source-location (vector-ref start 0) (vector-ref start 1) (vector-ref end 0) (vector-ref end 1)))
             (string->symbol (assert (symbol-hashtable-ref value 'identifier #f)))))]
@@ -645,7 +656,7 @@
             value])]
 
       [(hashtable [type "Constructor"] constructorName fieldNames)
-        `(data ,constructorName ,@(vector->list fieldNames))]
+        (make-data-expression (string->symbol constructorName) (vector-length fieldNames))]
 
       [(hashtable [type "Accessor"] expression fieldName)
         `(access ,(json-corefn-expression->scheme-corefn expression) ,fieldName)]
@@ -827,9 +838,9 @@
           [else (assert (atom? corefn)) corefn]))))
 
   (define (data-declaration->scheme module-prefix corefn)
-    (let ([name (string->symbol (string-append module-prefix (car corefn)))]
-          [arg-names (cddadr corefn)])
-      `(define-data-constructor ,name ,(length arg-names))))
+    (match corefn
+      [`(,name ,(record data-expression field-count))
+        `(define-data-constructor ,(string->symbol (string-append module-prefix name)) ,field-count)]))
 
   (define (newtype-declaration->scheme module-prefix corefn)
     (let ([name (string->symbol (string-append module-prefix (car corefn)))])
@@ -839,7 +850,7 @@
     (let ([corefn (json-corefn->scheme-corefn corefn)])
       (let-values ([(module-name module-path imports foreign-imports exports re-exports declarations) (apply values (cdr corefn))])
         (let ([module-prefix (module-name->prefix module-name)])
-          (let*-values ([(data-declarations declarations) (partition (lambda (item) (match item [`(,name (data ,@_)) #t] [else #f])) declarations)]
+          (let*-values ([(data-declarations declarations) (partition (lambda (item) (match item [`(,name ,(record data-expression)) #t] [else #f])) declarations)]
                         [(newtype-declarations declarations) (partition (lambda (item) (match item [`(,name (newtype)) #t] [else #f])) declarations)])
             `(library (,(string->symbol (module-name->dotted module-name)))
                 (export
