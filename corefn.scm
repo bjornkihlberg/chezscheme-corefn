@@ -440,7 +440,9 @@
            update-expression
            make-update-expression
            abstraction-expression
-           make-abstraction-expression)
+           make-abstraction-expression
+           atomic-expression
+           make-atomic-expression)
 
     (define-record-type corefn)
 
@@ -458,6 +460,18 @@
                     (assert (fxpositive? end-char))
                     (new start-line start-char end-line end-char)))]
       [opaque #t])
+
+    (define-record-type atomic-expression
+      [parent corefn]
+      [fields atom]
+      [protocol (lambda (new)
+                  (lambda (atom)
+                    (assert (or (char? atom)
+                                (boolean? atom)
+                                (string? atom)
+                                (and (integer? atom) (exact? atom))
+                                (and (number? atom) (inexact? atom))))
+                    ((new) atom)))])
 
     (define-record-type abstraction-expression
       [parent corefn]
@@ -676,7 +690,7 @@
       [(hashtable [type "Literal"] [value (hashtable literalType value)])
         (case literalType
           ["CharLiteral"
-            (string-ref value 0)]
+            (make-atomic-expression (string-ref value 0))]
 
           ["ArrayLiteral"
             `(array ,@(vector->list (vector-map json-corefn-expression->scheme-corefn value)))]
@@ -685,10 +699,10 @@
             `(object ,@(vector->list (vector-map (lambda (corefn) (list (vector-ref corefn 0) (json-corefn-expression->scheme-corefn (vector-ref corefn 1)))) value)))]
 
           ["NumberLiteral"
-            (exact->inexact value)]
+            (make-atomic-expression (exact->inexact value))]
 
           [else
-            value])]
+            (make-atomic-expression value)])]
 
       [(hashtable [type "Constructor"] constructorName fieldNames)
         (make-data-expression (string->symbol constructorName) (vector-length fieldNames))]
@@ -871,12 +885,13 @@
               `(array ,@(map loop xs))]
 
           [(record update-expression object updates)
-            `(%update ,(loop object) ,@(vector->list (vector-map (lambda (k/v) (list (car k/v) (cdr k/v))) updates)))]
+            `(%update ,(loop object) ,@(vector->list (vector-map (lambda (k/v) (list (car k/v) (loop (cdr k/v)))) updates)))]
 
           [(record access-expression object field-name)
             `(%access ,(loop object) ,field-name)]
 
-          [else (assert (atom? corefn)) corefn]))))
+          [(record atomic-expression atom)
+            atom]))))
 
   (define (data-declaration->scheme module-prefix corefn)
     (match corefn
