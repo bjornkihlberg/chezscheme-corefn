@@ -450,7 +450,9 @@
            application-expression
            make-application-expression
            bind-expression
-           make-bind-expression)
+           make-bind-expression
+           recursive-bind-expression
+           make-recursive-bind-expression)
 
     (define-record-type corefn)
 
@@ -468,6 +470,19 @@
                     (assert (fxpositive? end-char))
                     (new start-line start-char end-line end-char)))]
       [opaque #t])
+
+    (define-record-type recursive-bind-expression
+      [parent corefn]
+      [fields bindings body]
+      [protocol (lambda (new)
+                  (lambda (bindings body)
+                    (assert (vector? bindings))
+                    (vector-for-each
+                      (lambda (binding)
+                        (assert (pair? binding))
+                        (assert (symbol? (car binding))))
+                      bindings)
+                    ((new) bindings body)))])
 
     (define-record-type bind-expression
       [parent corefn]
@@ -798,28 +813,26 @@
                 caseAlternatives)))]
 
       [(hashtable [type "Let"] binds expression)
-        (let loop ([binds (vector->list binds)])
-          (if (null? binds)
+        (let loop ([items (vector->list binds)])
+          (if (null? items)
               (json-corefn-expression->scheme-corefn expression)
               ; https://github.com/purescript/purescript/blob/master/src/Language/PureScript/CoreFn/Expr.hs#L57-L68
               ; https://github.com/purescript/purescript/blob/fc3fa8897916de1a3973de976eaea1fba23b4df9/src/Language/PureScript/CoreFn/ToJSON.hs#L142-L159
-              (match (car binds)
+              (match (car items)
                 [(hashtable [bindType "NonRec"] identifier expression)
                   (make-bind-expression
                     (string->symbol identifier)
                     (json-corefn-expression->scheme-corefn expression)
-                    (loop (cdr binds)))]
+                    (loop (cdr items)))]
 
                 [(hashtable [bindType "Rec"] binds)
-                  `(bindrec
-                    ,(vector->list
-                      (vector-map
-                        (lambda (bind)
-                          (match bind
-                            [(hashtable identifier expression)
-                              (list identifier (json-corefn-expression->scheme-corefn expression))]))
-                        binds))
-                    ,(loop (cdr binds)))])))]))
+                  (make-recursive-bind-expression
+                    (vector-map (lambda (bind)
+                                  (match bind
+                                    [(hashtable identifier expression)
+                                      (cons (string->symbol identifier) (json-corefn-expression->scheme-corefn expression))]))
+                                binds)
+                    (loop (cdr items)))])))]))
 
   (define (json-corefn->scheme-corefn corefn)
     (let ([re-exports (hashtable-map-values vector->list (assert (symbol-hashtable-ref corefn 'reExports #f)))]
@@ -924,17 +937,11 @@
                   (inner-loop body (cons (list identifier (loop value)) acc))]
 
                 [else
-                  `(,(if (= (length acc) 1) 'let 'let*) ,(reverse acc) ,(loop body))]))]
+                  (list (if (= (length acc) 1) 'let 'let*) (reverse acc) (loop body))]))]
 
-          [`(bind ,(x (string->symbol x) x) ,e ,body)
-              (let inner-loop ([body body] [acc (list (list x (loop e)))])
-                (match body
-                  [`(bind ,(x (string->symbol x) x) ,e ,body) (inner-loop body (cons (list x (loop e)) acc))]
-                  [else `(,(if (= (length acc) 1) 'let 'let*) ,(reverse acc) ,(loop body))]))]
-          [`(bindrec ,bindings ,body)
-              `(letrec
-                (,@(map (lambda (var/val) (list (string->symbol (car var/val)) (loop (cadr var/val)))) bindings))
-                ,(loop body))]
+          [(record recursive-bind-expression bindings body)
+            `(letrec ,(vector->list (vector-map (lambda (binding) (list (car binding) (loop (cdr binding)))) bindings)) ,(loop body))]
+
           [`(case ,e* ,@clause*)
               `(case ,(map loop e*)
                   ,@(map
