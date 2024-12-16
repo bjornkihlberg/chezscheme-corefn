@@ -10,7 +10,7 @@
           object
           array
           data
-          access
+          %access
           update)
 
   (import (except (chezscheme) case))
@@ -76,7 +76,7 @@
           [(_ (v vs ...) [((o) ps ...) clause* ...]) (and (identifier? #'o) (free-identifier=? #'o #'object))
             #'(corefn-case-clause (vs ...) [(ps ...) clause* ...])]
           [(m (v vs ...) [((o [k x] k/x ...) ps ...) clause* ...]) (and (identifier? #'o) (free-identifier=? #'o #'object))
-            #`(let ([v0 (access v k)])
+            #`(let ([v0 (%access v k)])
                 (corefn-case-clause (v0 v vs ...) [(x (o k/x ...) ps ...) clause* ...]))]
           [(_ (v vs ...) [((n p) ps ...) clause* ...]) (identifier? #'n)
             #'(let ([n v]) (corefn-case-clause (v vs ...) [(p ps ...) clause* ...]))]
@@ -115,7 +115,7 @@
               #,@(map (lambda (k/v) #`(symbol-hashtable-set! ht '#,(car k/v) #,(cdr k/v))) k/v*)
               ht))]))
 
-  (define-syntax (access code)
+  (define-syntax (%access code)
     (syntax-case code ()
       [(m ht x) #`(cdr (assert (symbol-hashtable-ref-cell ht '#,(datum->syntax #'m (string->symbol (datum x))))))]))
 

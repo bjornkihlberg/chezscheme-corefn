@@ -434,7 +434,9 @@
            variable-expression
            make-variable-expression
            data-expression
-           make-data-expression)
+           make-data-expression
+           access-expression
+           make-access-expression)
 
     (define-record-type corefn)
 
@@ -452,6 +454,14 @@
                     (assert (fxpositive? end-char))
                     (new start-line start-char end-line end-char)))]
       [opaque #t])
+
+    (define-record-type access-expression
+      [parent corefn]
+      [fields object field-name]
+      [protocol (lambda (new)
+                  (lambda (object field-name)
+                    (assert (string? field-name))
+                    ((new) object field-name)))])
 
     (define-record-type data-expression
       [parent corefn]
@@ -659,7 +669,7 @@
         (make-data-expression (string->symbol constructorName) (vector-length fieldNames))]
 
       [(hashtable [type "Accessor"] expression fieldName)
-        `(access ,(json-corefn-expression->scheme-corefn expression) ,fieldName)]
+        (make-access-expression (json-corefn-expression->scheme-corefn expression) fieldName)]
 
       [(hashtable [type "ObjectUpdate"] expression updates)
         `(update
@@ -833,8 +843,10 @@
               `(array ,@(map loop xs))]
           [`(update ,e ,k/v*)
               `(update ,(loop e) ,@(map (lambda (k/v) (list (car k/v) (loop (cadr k/v)))) k/v*))]
-          [`(access ,e ,k)
-              `(access ,(loop e) ,k)]
+
+          [(record access-expression object field-name)
+            `(%access ,(loop object) ,field-name)]
+
           [else (assert (atom? corefn)) corefn]))))
 
   (define (data-declaration->scheme module-prefix corefn)
@@ -865,7 +877,7 @@
                       (import (prefix foreign-module ,(string->symbol module-prefix))))
                     '())
                 (import (only (chezscheme) define let let* letrec define-syntax make-compile-time-value)
-                        (only (prim) %app %ref -> define-newtype-constructor define-data-constructor case object array data access update)
+                        (only (prim) %app %ref -> define-newtype-constructor define-data-constructor case object array data %access update)
                         ,@(map (lambda (x) (list (string->symbol x))) (sort string<? (map module-name->dotted imports))))
                 (define-syntax src (make-compile-time-value ,module-path))
                 ,@(map
