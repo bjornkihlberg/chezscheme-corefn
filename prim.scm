@@ -11,7 +11,7 @@
           array
           data
           %access
-          update)
+          %update)
 
   (import (except (chezscheme) case))
 
@@ -119,7 +119,7 @@
     (syntax-case code ()
       [(m ht x) #`(cdr (assert (symbol-hashtable-ref-cell ht '#,(datum->syntax #'m (string->symbol (datum x))))))]))
 
-  (define-syntax (update code)
+  (define-syntax (%update code)
     (syntax-case code ()
       [(_ ht [k v] ...)
         (let ([k/v* (map

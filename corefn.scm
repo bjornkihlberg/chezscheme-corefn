@@ -436,7 +436,9 @@
            data-expression
            make-data-expression
            access-expression
-           make-access-expression)
+           make-access-expression
+           update-expression
+           make-update-expression)
 
     (define-record-type corefn)
 
@@ -454,6 +456,19 @@
                     (assert (fxpositive? end-char))
                     (new start-line start-char end-line end-char)))]
       [opaque #t])
+
+    (define-record-type update-expression
+      [parent corefn]
+      [fields object updates]
+      [protocol (lambda (new)
+                  (lambda (object updates)
+                    (assert (vector? updates))
+                    (vector-for-each
+                      (lambda (k/v)
+                        (assert (pair? k/v))
+                        (assert (string? (car k/v))))
+                      updates)
+                    ((new) object updates)))])
 
     (define-record-type access-expression
       [parent corefn]
@@ -672,9 +687,9 @@
         (make-access-expression (json-corefn-expression->scheme-corefn expression) fieldName)]
 
       [(hashtable [type "ObjectUpdate"] expression updates)
-        `(update
-          ,(json-corefn-expression->scheme-corefn expression)
-          ,(vector->list (vector-map (lambda (kv) (list (vector-ref kv 0) (json-corefn-expression->scheme-corefn (vector-ref kv 1)))) updates)))]
+        (make-update-expression
+          (json-corefn-expression->scheme-corefn expression)
+          (vector-map (lambda (kv) (cons (vector-ref kv 0) (json-corefn-expression->scheme-corefn (vector-ref kv 1)))) updates))]
 
       [(hashtable [type "Abs"] argument body)
         `(abstraction ,argument ,(json-corefn-expression->scheme-corefn body))]
@@ -841,8 +856,9 @@
               `(object ,@(map (lambda (k/v) (list (car k/v) (loop (cadr k/v)))) k/v*))]
           [`(array ,@xs)
               `(array ,@(map loop xs))]
-          [`(update ,e ,k/v*)
-              `(update ,(loop e) ,@(map (lambda (k/v) (list (car k/v) (loop (cadr k/v)))) k/v*))]
+
+          [(record update-expression object updates)
+            `(%update ,(loop object) ,@(vector->list (vector-map (lambda (k/v) (list (car k/v) (cdr k/v))) updates)))]
 
           [(record access-expression object field-name)
             `(%access ,(loop object) ,field-name)]
@@ -877,7 +893,7 @@
                       (import (prefix foreign-module ,(string->symbol module-prefix))))
                     '())
                 (import (only (chezscheme) define let let* letrec define-syntax make-compile-time-value)
-                        (only (prim) %app %ref -> define-newtype-constructor define-data-constructor case object array data %access update)
+                        (only (prim) %app %ref -> define-newtype-constructor define-data-constructor case object array data %access %update)
                         ,@(map (lambda (x) (list (string->symbol x))) (sort string<? (map module-name->dotted imports))))
                 (define-syntax src (make-compile-time-value ,module-path))
                 ,@(map
