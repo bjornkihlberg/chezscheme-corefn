@@ -19,19 +19,20 @@
     (syntax-rules ()
       [(_ arg body) (lambda (arg) body)]))
 
-  (define-syntax define-newtype-constructor
-    (syntax-rules ()
-      [(_ name) (define (name x) x)]))
+  (define identifier-role)
+
+  (define-syntax (define-newtype-constructor code)
+    (syntax-case code ()
+      [(_ name)
+        #'(begin
+            (define (name x) (assert-unreachable))
+            (define-property name identifier-role 'newtype))]))
 
   (define-syntax (define-data-constructor code)
     (syntax-case code ()
       [(_ name n)
         (with-syntax ([(args ...) (generate-temporaries (iota (datum n)))])
           #'(define (name args ...) (vector 'name args ...)))]))
-
-  (define-syntax %app
-    (syntax-rules ()
-      [(_ src span f x) (f x)]))
 
   (meta define (identifier-path module-name name)
     (datum->syntax name
@@ -44,6 +45,20 @@
                     (lambda (acc x) (cons* "." (symbol->string x) acc))
                     '()
                     (syntax->datum module-name))))))))
+
+  (define-syntax %app
+    (lambda (code)
+      (lambda (lookup)
+        (syntax-case code ()
+          [(_ _ _ (ref _ _ module-path name) arg)
+            (and
+              (identifier? #'ref)
+              (free-identifier=? #'ref #'%ref)
+              (eq? (lookup (identifier-path #'module-path #'name) #'identifier-role) 'newtype))
+            #'arg]
+
+          [(_ src span f x)
+            #'(f x)]))))
 
   (define-syntax (%ref code)
     (syntax-case code ()
