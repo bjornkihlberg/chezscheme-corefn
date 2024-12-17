@@ -50,22 +50,22 @@
     (lambda (code)
       (lambda (lookup)
         (syntax-case code ()
-          [(_ _ _ (ref _ _ module-path name) arg)
+          [(_ _ _ (ref _ _ name) arg)
             (and
               (identifier? #'ref)
               (free-identifier=? #'ref #'%ref)
-              (eq? (lookup (identifier-path #'module-path #'name) #'identifier-role) 'newtype))
+              (eq? (lookup #'name #'identifier-role) 'newtype))
             #'arg]
 
-          [(_ src span f x)
+          [(_ _ _ f x)
             #'(f x)]))))
 
   (define-syntax (%ref code)
     (syntax-case code ()
-      [(_ _ _ (p) n) (and (free-identifier=? #'p #'Prim) (free-identifier=? #'n #'undefined))
+      [(_ _ _ name) (free-identifier=? #'name #'Prim.undefined)
         #'(void)]
 
-      [(_ src span module-name name) (identifier-path #'module-name #'name)]))
+      [(_ _ _ name) #'name]))
 
   (define-syntax corefn-case-clause
     (lambda (code)

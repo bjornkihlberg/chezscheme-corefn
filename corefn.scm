@@ -980,7 +980,8 @@
                           (source-location-start-char source-location)
                           (source-location-end-line source-location)
                           (source-location-end-char source-location)))
-                  (vector->list module-name) identifier)]
+                  (do ([i (sub1 (vector-length module-name)) (sub1 i)] [acc (list (symbol->string identifier)) (cons* (symbol->string (vector-ref module-name i)) "." acc)])
+                      ((negative? i) (string->symbol (apply string-append acc)))))]
 
           [(record application-expression source-location abstraction value)
             (list '%app 'src
