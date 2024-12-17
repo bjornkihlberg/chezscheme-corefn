@@ -30,6 +30,9 @@
 
   (define-syntax (define-data-constructor code)
     (syntax-case code ()
+      [(_ name 0)
+        #'(define name 'name)]
+
       [(_ name n)
         (with-syntax ([(args ...) (generate-temporaries (iota (datum n)))])
           #'(define (name args ...) (vector 'name args ...)))]))
@@ -73,31 +76,46 @@
         (syntax-case code (->)
           [(_ () [() -> e])
             #'e]
+
           [(_ () [() [t -> e] ...])
             #'(cond [t e] ...)]
+
           [(_ (v vs ...) clause) (pair? (datum v))
             #'(let ([u v]) (corefn-case-clause (u vs ...) clause))]
+
           [(_ (v vs ...) [(p ps ...) clause* ...]) (and (identifier? #'p) (free-identifier=? #'p #'_))
             #'(corefn-case-clause (vs ...) [(ps ...) clause* ...])]
+
           [(_ (v vs ...) [(p ps ...) clause* ...]) (identifier? #'p)
             #'(let ([p v]) (corefn-case-clause (vs ...) [(ps ...) clause* ...]))]
+
+          [(_ (v vs ...) [((d module-name name) ps ...) clause* ...]) (and (identifier? #'d) (free-identifier=? #'d #'%data))
+            #`(when (symbol=? v '#,(identifier-path #'module-name #'name))
+                (corefn-case-clause (vs ...)
+                  [(ps ...) clause* ...]))]
+
           [(_ (v vs ...) [((d module-name name xs ...) ps ...) clause* ...]) (and (identifier? #'d) (free-identifier=? #'d #'%data))
             #`(when (symbol=? (vector-ref v 0) '#,(identifier-path #'module-name #'name))
                 (corefn-case-clause
                   (#,@(map (lambda (i) #`(vector-ref v #,(add1 i))) (iota (length #'(xs ...)))) vs ...)
                   ((xs ... ps ...) clause* ...)))]
+
           [(_ (v vs ...) [((a xs ...) ps ...) clause* ...]) (and (identifier? #'a) (free-identifier=? #'a #'%array))
             (let ([n (length #'(xs ...))])
               #`(when (= (vector-length v) #,n)
                   (corefn-case-clause (#,@(map (lambda (i) #`(vector-ref v #,i)) (iota n)) vs ...)
                     [(xs ... ps ...) clause* ...])))]
+
           [(_ (v vs ...) [((o) ps ...) clause* ...]) (and (identifier? #'o) (free-identifier=? #'o #'%object))
             #'(corefn-case-clause (vs ...) [(ps ...) clause* ...])]
+
           [(m (v vs ...) [((o [k x] k/x ...) ps ...) clause* ...]) (and (identifier? #'o) (free-identifier=? #'o #'%object))
             #`(let ([v0 (%access v k)])
                 (corefn-case-clause (v0 v vs ...) [(x (o k/x ...) ps ...) clause* ...]))]
+
           [(_ (v vs ...) [((n p) ps ...) clause* ...]) (identifier? #'n)
             #'(let ([n v]) (corefn-case-clause (v vs ...) [(p ps ...) clause* ...]))]
+
           [(_ (v vs ...) [(p ps ...) clause* ...])
             #'(when (equal? v p) (corefn-case-clause (vs ...) [(ps ...) clause* ...]))]))))
 
