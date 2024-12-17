@@ -25,7 +25,7 @@
     (syntax-case code ()
       [(_ name)
         #'(begin
-            (define (name x) (assert-unreachable))
+            (define (name x) (warningf 'name "newtype constructor executed with ~s" x) x)
             (define-property name identifier-role 'newtype))]))
 
   (define-syntax (define-data-constructor code)
