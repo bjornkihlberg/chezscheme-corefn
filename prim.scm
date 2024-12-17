@@ -47,6 +47,9 @@
 
   (define-syntax (%ref code)
     (syntax-case code ()
+      [(_ _ _ (p) n) (and (free-identifier=? #'p #'Prim) (free-identifier=? #'n #'undefined))
+        #'(void)]
+
       [(_ src span module-name name) (identifier-path #'module-name #'name)]))
 
   (define-syntax corefn-case-clause
