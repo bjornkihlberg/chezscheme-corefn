@@ -6,14 +6,14 @@
           ->
           define-newtype-constructor
           define-data-constructor
-          case
+          %case
           %object
           %array
           %data
           %access
           %update)
 
-  (import (except (chezscheme) case))
+  (import (chezscheme))
 
   (define-syntax ->
     (syntax-rules ()
@@ -83,7 +83,7 @@
           [(_ (v vs ...) [(p ps ...) clause* ...])
             #'(when (equal? v p) (corefn-case-clause (vs ...) [(ps ...) clause* ...]))]))))
 
-  (define-syntax (case code)
+  (define-syntax (%case code)
     (syntax-case code (->)
       [(_ (vs ...))
         #'(assertion-violationf 'case "No matching clause for ~s" (list vs ...))]

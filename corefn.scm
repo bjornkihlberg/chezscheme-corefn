@@ -452,9 +452,41 @@
            bind-expression
            make-bind-expression
            recursive-bind-expression
-           make-recursive-bind-expression)
+           make-recursive-bind-expression
+           case-expression
+           make-case-expression
+           case-alternative
+           make-case-alternative)
 
     (define-record-type corefn)
+
+    (define (binder? e)
+      (and
+        (corefn? e)
+        (or (variable-binder? e)
+            (null-binder? e)
+            (named-binder? e)
+            (newtype-binder? e)
+            (data-binder? e)
+            (array-binder? e)
+            (object-binder? e)
+            (atomic-binder? e))))
+
+    (define (expression? e)
+      (and
+        (corefn? e)
+        (or (case-expression? e)
+            (recursive-bind-expression? e)
+            (bind-expression? e)
+            (application-expression? e)
+            (object-expression? e)
+            (array-expression? e)
+            (atomic-expression? e)
+            (abstraction-expression? e)
+            (update-expression? e)
+            (access-expression? e)
+            (data-expression? e)
+            (variable-expression? e))))
 
     (define-record-type source-location
       [fields start-line start-char end-line end-char]
@@ -471,6 +503,43 @@
                     (new start-line start-char end-line end-char)))]
       [opaque #t])
 
+    (define-record-type case-alternative
+      [parent corefn]
+      [fields binders expression]
+      [protocol (lambda (new)
+                  (lambda (binders expression)
+                    (assert (vector? binders))
+                    (assert (fxpositive? (vector-length binders)))
+                    (vector-for-each (lambda (binder) (assert (binder? binder))) binders)
+                    (if (vector? expression)
+                        (vector-for-each
+                          (lambda (expression)
+                            (assert (pair? expression))
+                            (assert (expression? (car expression)))
+                            (assert (expression? (cdr expression))))
+                          expression)
+                        (assert (expression? expression)))
+                    ((new) binders expression)))])
+
+    (define-record-type case-expression
+      [parent corefn]
+      [fields expressions alternatives]
+      [protocol (lambda (new)
+                  (lambda (expressions alternatives)
+                    (assert (vector? expressions))
+                    (assert (fxpositive? (vector-length expressions)))
+                    (vector-for-each
+                      (lambda (expression) (assert (expression? expression)))
+                      expressions)
+                    (assert (vector? alternatives))
+                    (assert (fxpositive? (vector-length alternatives)))
+                    (vector-for-each
+                      (lambda (alternative)
+                        (assert (case-alternative? alternative))
+                        (assert (= (vector-length (case-alternative-binders alternative)) (vector-length expressions))))
+                      alternatives)
+                    ((new) expressions alternatives)))])
+
     (define-record-type recursive-bind-expression
       [parent corefn]
       [fields bindings body]
@@ -480,8 +549,10 @@
                     (vector-for-each
                       (lambda (binding)
                         (assert (pair? binding))
-                        (assert (symbol? (car binding))))
+                        (assert (symbol? (car binding)))
+                        (assert (expression? (cdr binding))))
                       bindings)
+                    (assert (expression? body))
                     ((new) bindings body)))])
 
     (define-record-type bind-expression
@@ -490,6 +561,7 @@
       [protocol (lambda (new)
                   (lambda (identifier value body)
                     (assert (symbol? identifier))
+                    (assert (expression? body))
                     ((new) identifier value body)))])
 
     (define-record-type application-expression
@@ -498,6 +570,8 @@
       [protocol (lambda (new)
                   (lambda (source-location abstraction value)
                     (when source-location (assert (source-location? source-location)))
+                    (assert (expression? abstraction))
+                    (assert (expression? value))
                     ((new) source-location abstraction value)))])
 
     (define-record-type object-expression
@@ -509,7 +583,8 @@
                     (vector-for-each
                       (lambda (item)
                         (assert (pair? item))
-                        (assert (string? (car item))))
+                        (assert (string? (car item)))
+                        (assert (expression? (cdr item))))
                       items)
                     ((new) items)))])
 
@@ -519,6 +594,9 @@
       [protocol (lambda (new)
                   (lambda (items)
                     (assert (vector? items))
+                    (vector-for-each
+                      (lambda (item) (assert (expression? item)))
+                      items)
                     ((new) items)))])
 
     (define-record-type atomic-expression
@@ -539,6 +617,7 @@
       [protocol (lambda (new)
                   (lambda (argument body)
                     (assert (symbol? argument))
+                    (assert (expression? body))
                     ((new) argument body)))])
 
     (define-record-type update-expression
@@ -546,11 +625,13 @@
       [fields object updates]
       [protocol (lambda (new)
                   (lambda (object updates)
+                    (assert (expression? object))
                     (assert (vector? updates))
                     (vector-for-each
                       (lambda (k/v)
                         (assert (pair? k/v))
-                        (assert (string? (car k/v))))
+                        (assert (string? (car k/v)))
+                        (assert (expression? (cdr k/v))))
                       updates)
                     ((new) object updates)))])
 
@@ -559,6 +640,7 @@
       [fields object field-name]
       [protocol (lambda (new)
                   (lambda (object field-name)
+                    (assert (expression? object))
                     (assert (string? field-name))
                     ((new) object field-name)))])
 
@@ -582,18 +664,6 @@
                     (when source-location (assert (source-location? source-location)))
                     (assert (symbol? identifier))
                     ((new) module-name source-location identifier)))])
-
-    (define (binder? e)
-      (and
-        (corefn? e)
-        (or (variable-binder? e)
-            (null-binder? e)
-            (named-binder? e)
-            (newtype-binder? e)
-            (data-binder? e)
-            (array-binder? e)
-            (object-binder? e)
-            (atomic-binder? e))))
 
     (define-record-type variable-binder
       [parent corefn]
@@ -787,30 +857,26 @@
           (json-corefn-expression->scheme-corefn argument))]
 
       [(hashtable [type "Case"] caseExpressions caseAlternatives)
-        `(case
-          ,(vector->list (vector-map json-corefn-expression->scheme-corefn caseExpressions))
-          ,@(vector->list
-              (vector-map
-                (lambda (caseAlternative)
-                  ; https://github.com/purescript/purescript/blob/master/src/Language/PureScript/CoreFn/Expr.hs#L75-L87
-                  ; https://github.com/purescript/purescript/blob/fc3fa8897916de1a3973de976eaea1fba23b4df9/src/Language/PureScript/CoreFn/ToJSON.hs#L214-L224
-                  (let ([binders (vector->list (vector-map json-corefn-binder->scheme-corefn (assert (symbol-hashtable-ref caseAlternative 'binders #f))))])
-                    (match caseAlternative
-                      ; https://github.com/purescript/purescript/blob/master/src/Language/PureScript/CoreFn/Expr.hs#L70-L73
-                      [(hashtable [isGuarded #t] expressions)
-                        (list binders #t
-                              (vector->list
-                                (vector-map
-                                  (lambda (corefn)
-                                    (match corefn
-                                      [(hashtable guard expression)
-                                        (list (json-corefn-expression->scheme-corefn guard)
-                                              (json-corefn-expression->scheme-corefn expression))]))
-                                  expressions)))]
+        (make-case-expression
+          (vector-map json-corefn-expression->scheme-corefn caseExpressions)
+          (vector-map (lambda (caseAlternative)
+                        ; https://github.com/purescript/purescript/blob/master/src/Language/PureScript/CoreFn/Expr.hs#L75-L87
+                        ; https://github.com/purescript/purescript/blob/fc3fa8897916de1a3973de976eaea1fba23b4df9/src/Language/PureScript/CoreFn/ToJSON.hs#L214-L224
+                        (let ([binders (vector-map json-corefn-binder->scheme-corefn (assert (symbol-hashtable-ref caseAlternative 'binders #f)))])
+                          (match caseAlternative
+                            ; https://github.com/purescript/purescript/blob/master/src/Language/PureScript/CoreFn/Expr.hs#L70-L73
+                            [(hashtable [isGuarded #t] expressions)
+                              (make-case-alternative binders
+                                (vector-map (lambda (expression)
+                                              (match expression
+                                                [(hashtable guard expression)
+                                                  (cons (json-corefn-expression->scheme-corefn guard)
+                                                        (json-corefn-expression->scheme-corefn expression))]))
+                                            expressions))]
 
-                      [(hashtable [isGuarded #f] expression)
-                        (list binders #f (json-corefn-expression->scheme-corefn expression))])))
-                caseAlternatives)))]
+                            [(hashtable [isGuarded #f] expression)
+                              (make-case-alternative binders (json-corefn-expression->scheme-corefn expression))])))
+                      caseAlternatives))]
 
       [(hashtable [type "Let"] binds expression)
         (let loop ([items (vector->list binds)])
@@ -942,15 +1008,20 @@
           [(record recursive-bind-expression bindings body)
             `(letrec ,(vector->list (vector-map (lambda (binding) (list (car binding) (loop (cdr binding)))) bindings)) ,(loop body))]
 
-          [`(case ,e* ,@clause*)
-              `(case ,(map loop e*)
-                  ,@(map
-                      (lambda (clause)
-                        (match clause
-                          [`(,ps #f ,e) `(,(map corefn-case-binding->scheme ps) -> ,(loop e))]
-                          [`(,ps #t ,es) `(,(map corefn-case-binding->scheme ps) ,@(map (lambda (e) `(,(loop (car e)) -> ,(loop (cadr e)))) es))]
-                          [else (assert #f)]))
-                      clause*))]
+          [(record case-expression expressions alternatives)
+            `(%case
+              ,(vector->list (vector-map loop expressions))
+              ,@(vector->list
+                  (vector-map (lambda (alternative)
+                                (match alternative
+                                  [(record case-alternative binders expression)
+                                    (if (vector? expression)
+                                      `(,(vector->list (vector-map corefn-case-binding->scheme binders))
+                                        ,@(vector->list
+                                            (vector-map (lambda (expression) `(,(loop (car expression)) -> ,(loop (cdr expression))))
+                                                        expression)))
+                                      `(,(vector->list (vector-map corefn-case-binding->scheme binders)) -> ,(loop expression)))]))
+                              alternatives)))]
 
           [(record object-expression items)
             `(%object ,@(vector->list (vector-map (lambda (k/v) (list (car k/v) (loop (cdr k/v)))) items)))]
@@ -995,7 +1066,7 @@
                       (import (prefix foreign-module ,(string->symbol module-prefix))))
                     '())
                 (import (only (chezscheme) define let let* letrec define-syntax make-compile-time-value)
-                        (only (prim) %app %ref -> define-newtype-constructor define-data-constructor case %object %array %data %access %update)
+                        (only (prim) %app %ref -> define-newtype-constructor define-data-constructor %case %object %array %data %access %update)
                         ,@(map (lambda (x) (list (string->symbol x))) (sort string<? (map module-name->dotted imports))))
                 (define-syntax src (make-compile-time-value ,module-path))
                 ,@(map
@@ -1016,8 +1087,8 @@
       (pretty-format '%object '(_ [bracket x e] 8 ...))
       (pretty-format '%update '(_ _ [bracket x e] 8 ...))
       (pretty-format '%array  '(_ e 7 ...))
-      (pretty-format 'case   '(_ (_ ...) 1 (alt [bracket (_ ...) '-> _]
-                                                [bracket (_ ...) 1 [bracket _ '-> _] ...]) ...))
+      (pretty-format '%case   '(_ (_ ...) 1 (alt [bracket (_ ...) '-> _]
+                                                 [bracket (_ ...) 1 [bracket _ '-> _] ...]) ...))
       (let-values ([(name exports core-import foreign-module foreign-import import0 imports src definitions)
                       (match corefn-library
                         [`(library ,name (export ,@exports) (import ,@core-import) (module ,@foreign-module) (import ,@foreign-import) (import ,import0 ,@imports) ,src ,@definitions)
