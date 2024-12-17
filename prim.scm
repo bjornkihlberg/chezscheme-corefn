@@ -34,8 +34,12 @@
         #'(define name 'name)]
 
       [(_ name n)
-        (with-syntax ([(args ...) (generate-temporaries (iota (datum n)))])
-          #'(define (name args ...) (vector 'name args ...)))]))
+        #`(define name
+            #,(let ([args (generate-temporaries (iota (datum n)))])
+                (let loop ([cca args])
+                  (if (null? cca)
+                      #`(vector 'name #,@args)
+                      #`(lambda (#,(car cca)) #,(loop (cdr cca)))))))]))
 
   (meta define (identifier-path module-name name)
     (datum->syntax name
