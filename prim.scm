@@ -94,12 +94,12 @@
             #'(let ([p v]) (corefn-case-clause (vs ...) [(ps ...) clause* ...]))]
 
           [(_ (v vs ...) [((d module-name name) ps ...) clause* ...]) (and (identifier? #'d) (free-identifier=? #'d #'%data))
-            #`(when (symbol=? v '#,(identifier-path #'module-name #'name))
+            #`(when (eq? v '#,(identifier-path #'module-name #'name))
                 (corefn-case-clause (vs ...)
                   [(ps ...) clause* ...]))]
 
           [(_ (v vs ...) [((d module-name name xs ...) ps ...) clause* ...]) (and (identifier? #'d) (free-identifier=? #'d #'%data))
-            #`(when (symbol=? (vector-ref v 0) '#,(identifier-path #'module-name #'name))
+            #`(when (and (vector? v) (symbol=? (vector-ref v 0) '#,(identifier-path #'module-name #'name)))
                 (corefn-case-clause
                   (#,@(map (lambda (i) #`(vector-ref v #,(add1 i))) (iota (length #'(xs ...)))) vs ...)
                   ((xs ... ps ...) clause* ...)))]
