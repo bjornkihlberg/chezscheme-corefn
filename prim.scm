@@ -19,14 +19,12 @@
     (syntax-rules ()
       [(_ arg body) (lambda (arg) body)]))
 
-  (define identifier-role)
-
-  (define-syntax (define-newtype-constructor code)
-    (syntax-case code ()
+  (define-syntax define-newtype-constructor
+    (syntax-rules ()
       [(_ name)
-        #'(begin
-            (define (name x) (warningf 'name "newtype constructor executed with ~s" x) x)
-            (define-property name identifier-role 'newtype))]))
+        (define (name x)
+          (warningf 'name "newtype constructor executed with ~s" x)
+          x)]))
 
   (define-syntax (define-data-constructor code)
     (syntax-case code ()
@@ -54,18 +52,7 @@
                     (syntax->datum module-name))))))))
 
   (define-syntax %app
-    (lambda (code)
-      (lambda (lookup)
-        (syntax-case code ()
-          [(_ _ _ (ref _ _ name) arg)
-            (and
-              (identifier? #'ref)
-              (free-identifier=? #'ref #'%ref)
-              (eq? (lookup #'name #'identifier-role) 'newtype))
-            #'arg]
-
-          [(_ _ _ f x)
-            #'(f x)]))))
+    (syntax-rules () [(_ _ _ f x) (f x)]))
 
   (define-syntax (%ref code)
     (syntax-case code ()
