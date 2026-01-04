@@ -915,16 +915,19 @@
                               (let ([bind-type (symbol-hashtable-ref (car decls) 'bindType #f)])
                                 (if (and bind-type (string=? bind-type "Rec"))
                                     (loop (append (vector->list (assert (symbol-hashtable-ref (car decls) 'binds #f))) (cdr decls)) acc)
-                                    (let ([expression (assert (symbol-hashtable-ref (car decls) 'expression #f))])
-                                      (loop (cdr decls)
-                                        (let ([meta-ann (assert (symbol-hashtable-ref (assert (symbol-hashtable-ref expression 'annotation #f)) 'meta #f))]
-                                              [id (assert (symbol-hashtable-ref (car decls) 'identifier #f))])
-                                          (let ([meta-type (and (not (eq? meta-ann 'null)) (symbol-hashtable-ref meta-ann 'metaType #f))])
-                                            (case meta-type
-                                              ["IsNewtype"
-                                                (cons (list id '(newtype))
-                                                      acc)]
-                                              [else (cons (list id (json-corefn-expression->scheme-corefn expression)) acc)])))))))))])
+                                    (let ([expression (assert (symbol-hashtable-ref (car decls) 'expression #f))]
+                                          [annotation-meta (assert (symbol-hashtable-ref (assert (symbol-hashtable-ref (car decls) 'annotation #f)) 'meta #f))])
+                                      (if (and (hashtable? annotation-meta) (equal? (symbol-hashtable-ref annotation-meta 'metaType #f) "IsTypeClassConstructor"))
+                                          (loop (cdr decls) acc)
+                                          (loop (cdr decls)
+                                            (let ([meta-ann (assert (symbol-hashtable-ref (assert (symbol-hashtable-ref expression 'annotation #f)) 'meta #f))]
+                                                  [id (assert (symbol-hashtable-ref (car decls) 'identifier #f))])
+                                              (let ([meta-type (and (not (eq? meta-ann 'null)) (symbol-hashtable-ref meta-ann 'metaType #f))])
+                                                (case meta-type
+                                                  ["IsNewtype"
+                                                    (cons (list id '(newtype))
+                                                          acc)]
+                                                  [else (cons (list id (json-corefn-expression->scheme-corefn expression)) acc)]))))))))))])
       (let ([imports (filter (lambda (x) (and (not (equal? x '("Prim"))) (not (equal? x module-name)))) (vector->list (vector-map (lambda (x) (vector->list (assert (symbol-hashtable-ref x 'moduleName #f)))) (assert (symbol-hashtable-ref corefn 'imports #f)))))])
         `(corefn-module
           ,module-name
