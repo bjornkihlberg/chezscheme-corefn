@@ -848,6 +848,9 @@
       [(hashtable [type "Abs"] argument body)
         (make-abstraction-expression (string->symbol argument) (json-corefn-expression->scheme-corefn body))]
 
+      [(hashtable [type "App"] [abstraction (hashtable [type "Var"] [annotation (hashtable [meta (hashtable [metaType "IsNewtype"])])])] argument)
+        (json-corefn-expression->scheme-corefn argument)]
+
       [(hashtable [type "App"] [annotation (hashtable [sourceSpan (hashtable start end)])] abstraction argument)
         (make-application-expression
           (and
